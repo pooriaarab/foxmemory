@@ -1,6 +1,6 @@
 {
   "name": "foxmemory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local memory for AI agents that the user can read, edit, and delete.",
   "type": "module",
   "license": "MIT",
