@@ -64,3 +64,24 @@ export interface RememberResult {
   /** Ids removed to keep the store under `maxItems`. */
   evicted: string[];
 }
+
+export interface RecallOptions {
+  /** How many hits at most. Default 5. */
+  k?: number;
+  kinds?: Kind[];
+  /** The lowest cosine similarity to return. Default 0. */
+  minScore?: number;
+}
+
+export interface Hit {
+  memory: Memory;
+  /** Cosine similarity of the query and the memory, from -1 to 1. */
+  similarity: number;
+  /** similarity plus the recency boost. Hits are sorted by it. */
+  score: number;
+}
+
+export interface ListOptions {
+  kinds?: Kind[];
+  contains?: string;
+}
