@@ -81,6 +81,26 @@ export interface Hit {
   score: number;
 }
 
+export interface MemoryPatch {
+  text?: string;
+  kind?: Kind;
+  source?: string;
+  pinned?: boolean;
+  /** A time, or null to remove the expiry. */
+  expiresAt?: number | null;
+}
+
+/** Every field you set must match. Set at least one. */
+export interface ForgetFilter {
+  kinds?: Kind[];
+  source?: string;
+  /** Text contains this, any case. */
+  contains?: string;
+  /** Last updated before this time. */
+  before?: number;
+  pinned?: boolean;
+}
+
 export interface ListOptions {
   kinds?: Kind[];
   contains?: string;
