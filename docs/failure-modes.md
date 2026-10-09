@@ -28,3 +28,7 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F19 | An import brings vectors from another model. | They are kept with their model id and embedded again at the next recall (F11). | `tests/exchange.test.ts` |
 | F20 | An import skips the `redact` hook. | Imported text goes through `redact`. Text that changes loses its old vector. | `tests/exchange.test.ts` |
 | F21 | Export and import lose data. | A round trip keeps text, kind, source, dates and `pinned`. | `tests/exchange.test.ts`, E2E |
+| F22 | Two writers on one store file lose a write. | A lock file serializes writes, and each writer reloads a changed file before it writes. | `tests/file.test.ts` |
+| F23 | A crash during a write leaves half a file, or a broken file is read as empty and then overwritten. | Writes go to a temp file and then rename. A broken file fails with `corrupt` and stays as it is. | `tests/file.test.ts` |
+| F24 | A lock file from a crashed process blocks writes forever. | A lock older than `staleMs` is taken over. A live lock that does not clear fails with `locked`. | `tests/file.test.ts` |
+| F25 | The CLI gets bad arguments. | It prints the usage and exits with code 2. | `tests/cli.test.ts` |
