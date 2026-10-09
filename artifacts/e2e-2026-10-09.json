@@ -1,0 +1,183 @@
+{
+  "startedAt": "2026-10-09T06:56:52.627Z",
+  "checks": [
+    {
+      "name": "20 facts stored through the Memory page",
+      "ok": true,
+      "actual": 20
+    },
+    {
+      "name": "each memory keeps the real model id",
+      "ok": true,
+      "actual": {
+        "Xenova/all-MiniLM-L6-v2": 20
+      }
+    },
+    {
+      "name": "each paraphrased question finds its fact in the top 3 (F30)",
+      "ok": true,
+      "actual": {
+        "top1": 20,
+        "top3": 20,
+        "of": 20,
+        "misses": [],
+        "afterEdit": [
+          {
+            "score": 0.62,
+            "text": "I take my coffee with soy milk now, still no sugar."
+          },
+          {
+            "score": 0.25,
+            "text": "I am allergic to peanuts."
+          },
+          {
+            "score": 0.14,
+            "text": "I am vegetarian and do not eat fish."
+          }
+        ]
+      }
+    },
+    {
+      "name": "a repeated fact is refreshed, not stored twice (F1)",
+      "ok": true,
+      "actual": {
+        "count": 20,
+        "status": "You told me this already. I refreshed it."
+      }
+    },
+    {
+      "name": "edit, delete and pin last after a reload (F31)",
+      "ok": true,
+      "actual": {
+        "count": 19,
+        "first": {
+          "text": "My favourite author is Ursula K. Le Guin.",
+          "pinned": "true"
+        }
+      }
+    },
+    {
+      "name": "recall finds the edited text, not the old one",
+      "ok": true,
+      "actual": [
+        {
+          "score": 0.62,
+          "text": "I take my coffee with soy milk now, still no sugar."
+        },
+        {
+          "score": 0.25,
+          "text": "I am allergic to peanuts."
+        },
+        {
+          "score": 0.14,
+          "text": "I am vegetarian and do not eat fish."
+        }
+      ]
+    },
+    {
+      "name": "two pages at once: no lost write, no duplicate (F26)",
+      "ok": true,
+      "actual": {
+        "before": 19,
+        "total": 40
+      }
+    },
+    {
+      "name": "the other page shows the change without a reload (F27)",
+      "ok": true,
+      "actual": "41"
+    },
+    {
+      "name": "delete all through the page empties the store",
+      "ok": true,
+      "actual": {
+        "count": 0,
+        "status": "Deleted every memory."
+      }
+    },
+    {
+      "name": "export, delete all, import: every memory comes back (F21)",
+      "ok": true,
+      "actual": {
+        "exported": 41,
+        "imported": {
+          "added": 41,
+          "updated": 0,
+          "skipped": 0
+        },
+        "top": {
+          "score": 0.4,
+          "text": "My dentist is Dr. Okafor on Queen Street."
+        }
+      }
+    },
+    {
+      "name": "10,000 memories: the first recall in a new page, model loaded, under 2 s (F16)",
+      "ok": true,
+      "actual": {
+        "items": 10000,
+        "modelLoadMs": 657,
+        "importMs": 6865,
+        "firstRecallMs": 924,
+        "warmRecallMs": 82,
+        "coldPageModelLoadMs": 4570,
+        "coldPageRecallMs": 1263
+      }
+    },
+    {
+      "name": "a cold model load and an idle gap with a 2 s background timeout (F29)",
+      "ok": true,
+      "actual": [
+        {
+          "score": 0.31,
+          "text": "The boiler service is booked for October."
+        }
+      ]
+    }
+  ],
+  "timings": {
+    "firstRememberWithModelLoadMs": 2729,
+    "rememberMedianMs": 221,
+    "recallMedianMs": 221,
+    "recallInPageMedianMs": 15,
+    "importMs": 11,
+    "recallWithReembedOfAllMs": 1139,
+    "bulk": {
+      "items": 10000,
+      "modelLoadMs": 657,
+      "importMs": 6865,
+      "firstRecallMs": 924,
+      "warmRecallMs": 82,
+      "coldPageModelLoadMs": 4570,
+      "coldPageRecallMs": 1263
+    },
+    "coldRememberShortIdleMs": 5131,
+    "recallAfterIdleMs": 13039
+  },
+  "firefox": "firefox/157.0.1",
+  "env": {
+    "crossOriginIsolated": false,
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:157.0) Gecko/20100101 Firefox/157.0"
+  },
+  "recall": {
+    "top1": 20,
+    "top3": 20,
+    "of": 20,
+    "misses": [],
+    "afterEdit": [
+      {
+        "score": 0.62,
+        "text": "I take my coffee with soy milk now, still no sugar."
+      },
+      {
+        "score": 0.25,
+        "text": "I am allergic to peanuts."
+      },
+      {
+        "score": 0.14,
+        "text": "I am vegetarian and do not eat fish."
+      }
+    ]
+  },
+  "passed": true
+}

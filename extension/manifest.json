@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "foxmemory demo",
+  "version": "0.1.0",
+  "description": "Local memory for AI agents that the user can read, edit, and delete.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "foxmemory@pooriaarab",
+      "strict_min_version": "153.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
+  "permissions": ["unlimitedStorage"],
+  "background": {
+    "scripts": ["background.js"],
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Memory"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}
