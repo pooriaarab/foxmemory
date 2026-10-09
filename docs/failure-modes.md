@@ -32,3 +32,6 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F23 | A crash during a write leaves half a file, or a broken file is read as empty and then overwritten. | Writes go to a temp file and then rename. A broken file fails with `corrupt` and stays as it is. | `tests/file.test.ts` |
 | F24 | A lock file from a crashed process blocks writes forever. | A lock older than `staleMs` is taken over. A live lock that does not clear fails with `locked`. | `tests/file.test.ts` |
 | F25 | The CLI gets bad arguments. | It prints the usage and exits with code 2. | `tests/cli.test.ts` |
+| F26 | Two extension pages write to one IndexedDB store at once. | Web Locks serialize the writes. No record is lost and no duplicate is stored. | `tests/idb.test.ts`, E2E |
+| F27 | A page keeps a stale copy after another page writes. | Each call checks the store version and reloads when it changed. | `tests/idb.test.ts`, E2E |
+| F28 | IndexedDB cannot open (for example, the profile blocks storage). | It fails with `unavailable` and the browser's reason. | `tests/idb.test.ts` |
