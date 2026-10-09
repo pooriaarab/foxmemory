@@ -3,10 +3,12 @@ import {
   KINDS,
   type Change,
   type Embedder,
+  type ForgetFilter,
   type Hit,
   type Kind,
   type ListOptions,
   type Memory,
+  type MemoryPatch,
   type RecallOptions,
   type RememberMeta,
   type RememberResult,
@@ -34,6 +36,12 @@ export interface MemoryOptions {
 export interface FoxMemory {
   remember(text: string, meta?: RememberMeta): Promise<RememberResult>;
   recall(query: string, options?: RecallOptions): Promise<Hit[]>;
+  update(id: string, patch: MemoryPatch): Promise<Memory>;
+  /** Returns false when there was no such memory. */
+  forget(id: string): Promise<boolean>;
+  /** Returns how many memories it removed. */
+  forgetWhere(filter: ForgetFilter): Promise<number>;
+  clear(): Promise<void>;
   /** Pinned first, then the newest first. */
   list(options?: ListOptions): Promise<Memory[]>;
   get(id: string): Promise<Memory | undefined>;
@@ -63,9 +71,12 @@ function checkKind(kind: unknown): void {
   if (kind !== undefined && !KINDS.includes(kind as Kind)) throw bad(`kind must be one of ${KINDS.join(", ")}.`);
 }
 
-function matches(record: StoredMemory, filter: ListOptions): boolean {
+function matches(record: StoredMemory, filter: ForgetFilter & ListOptions): boolean {
   if (filter.kinds && !filter.kinds.includes(record.kind)) return false;
+  if (filter.source !== undefined && record.source !== filter.source) return false;
   if (filter.contains !== undefined && !record.text.toLowerCase().includes(filter.contains.toLowerCase())) return false;
+  if (filter.before !== undefined && !(record.updatedAt < filter.before)) return false;
+  if (filter.pinned !== undefined && record.pinned !== filter.pinned) return false;
   return true;
 }
 
@@ -198,6 +209,52 @@ export function createMemory(options: MemoryOptions): FoxMemory {
         return hits.slice(0, k).map(({ record, similarity, score }) => ({ memory: view(record), similarity, score }));
       });
     },
+
+    async update(id, patch) {
+      checkKind(patch.kind);
+      if (patch.pinned !== undefined && typeof patch.pinned !== "boolean") throw bad("pinned must be true or false.");
+      if (patch.source !== undefined && typeof patch.source !== "string") throw bad("source must be a string.");
+      if (patch.expiresAt !== undefined && patch.expiresAt !== null && !isTime(patch.expiresAt)) throw bad("expiresAt must be a time in milliseconds, or null.");
+      const text = patch.text === undefined ? undefined : await redact(patch.text, { kind: patch.kind, source: patch.source });
+      const embedded = text === undefined ? undefined : await embed([text]);
+      return store.lock(async () => {
+        const all = await current();
+        const old = all.get(id);
+        if (!old) throw new FoxmemoryError("not_found", `There is no memory with id ${id}.`);
+        if (text !== undefined && [...all.values()].some((record) => record.id !== id && textKey(record.text) === textKey(text))) {
+          throw bad("Another memory has this text already.");
+        }
+        const record: StoredMemory = { ...old, updatedAt: now() };
+        if (patch.kind !== undefined) record.kind = patch.kind;
+        if (patch.source !== undefined) record.source = patch.source;
+        if (patch.pinned !== undefined) record.pinned = patch.pinned;
+        if (patch.expiresAt === null) delete record.expiresAt;
+        else if (patch.expiresAt !== undefined) record.expiresAt = patch.expiresAt;
+        if (text !== undefined && embedded) Object.assign(record, { text, vector: embedded.vectors[0]!, model: embedded.model });
+        await write({ put: [record], remove: [] });
+        return view(record);
+      });
+    },
+
+    forget: (id) =>
+      store.lock(async () => {
+        if (!(await current()).has(id)) return false;
+        await write({ put: [], remove: [id] });
+        return true;
+      }),
+
+    async forgetWhere(filter) {
+      const keys = (["kinds", "source", "contains", "before", "pinned"] as const).filter((key) => filter?.[key] !== undefined);
+      if (keys.length === 0) throw bad("forgetWhere needs at least one filter field. Use clear() to delete every memory.");
+      checkKind(filter.kinds?.find((kind) => !KINDS.includes(kind)));
+      return store.lock(async () => {
+        const gone = [...(await current()).values()].filter((record) => matches(record, filter)).map((record) => record.id);
+        if (gone.length > 0) await write({ put: [], remove: gone });
+        return gone.length;
+      });
+    },
+
+    clear: () => store.lock(() => write({ put: [], remove: [], clear: true })),
 
     async list(listOptions = {}) {
       return [...(await records()).values()]
