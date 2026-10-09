@@ -1,6 +1,4 @@
-// The demo's background script (an event page in Firefox MV3). The E2E test
-// reads this value back through popup.html. Replace it with code that runs
-// foxmemory.
-browser.runtime.onInstalled.addListener(() => {
-  browser.storage.local.set({ fixture: "installed" });
-});
+// The demo's background page. It only opens the Memory page. The model and
+// the memories live in the Memory page: Firefox stops an idle background
+// page even while it owes a reply, so a slow model load there fails.
+browser.action.onClicked.addListener(() => browser.tabs.create({ url: browser.runtime.getURL("memory.html") }));
