@@ -17,3 +17,9 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F8 | Recall on an empty store, or with `k` at 0, throws. | It returns an empty list. `k`, `kinds` and `minScore` filter the hits. | `tests/core.test.ts` |
 | F9 | The recency boost lets a new, unrelated memory beat an old, close one. | The boost is small (default 0.05). A close match always wins over a far one. | `tests/core.test.ts` |
 | F10 | `update` of an unknown id fails without a clear reason. | It fails with `not_found`. | `tests/core.test.ts` |
+| F11 | An embedding model swap mixes two vector spaces. | Each record keeps its model id and dimension. Recall compares only vectors from the query's model. It embeds other records again first, in batches, and keeps them. | `tests/models.test.ts` |
+| F12 | The embedder changes model during a batch of re-embedding. | The call fails with `embed_failed`. Batches done before keep the new vectors. No record holds a vector from the wrong model. | `tests/models.test.ts` |
+| F13 | An embedding call fails in the middle of `rememberMany`. | Nothing from that call is stored. It fails with `embed_failed`, and the cause is kept. | `tests/models.test.ts` |
+| F14 | The embedder returns the wrong count, the wrong size, or `NaN`. | It fails with `embed_failed`. Nothing is stored. | `tests/models.test.ts` |
+| F15 | The store grows without a limit. | Over `maxItems`, the oldest unpinned items go first, and the result lists them. Pinned items never go. When all are pinned, the call fails with `full`. | `tests/models.test.ts` |
+| F16 | A huge store makes recall slow. | 10,000 items recall in under 200 ms in Node, without the embed call. The E2E test measures it in Firefox. | `tests/models.test.ts`, E2E |

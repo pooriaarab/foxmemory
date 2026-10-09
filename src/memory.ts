@@ -25,6 +25,10 @@ export interface MemoryOptions {
   embedder: Embedder;
   /** Runs before a text is embedded or stored. Return the text to keep, or null to refuse it. */
   redact?: (text: string, meta: RememberMeta) => string | null | Promise<string | null>;
+  /** The most memories to keep. Over it, the oldest unpinned ones go. Default 10000. */
+  maxItems?: number;
+  /** The most texts in one embed call. Default 32. */
+  batchSize?: number;
   /** How much a brand-new memory gains over an old one in recall. Default 0.05. */
   recencyWeight?: number;
   /** The age at which the recency boost is half. Default 30 days. */
@@ -35,6 +39,8 @@ export interface MemoryOptions {
 
 export interface FoxMemory {
   remember(text: string, meta?: RememberMeta): Promise<RememberResult>;
+  /** All or nothing: when one embed call fails, none is stored. Each result lists every id the call evicted. */
+  rememberMany(items: (RememberMeta & { text: string })[]): Promise<RememberResult[]>;
   recall(query: string, options?: RecallOptions): Promise<Hit[]>;
   update(id: string, patch: MemoryPatch): Promise<Memory>;
   /** Returns false when there was no such memory. */
@@ -45,8 +51,15 @@ export interface FoxMemory {
   /** Pinned first, then the newest first. */
   list(options?: ListOptions): Promise<Memory[]>;
   get(id: string): Promise<Memory | undefined>;
+  stats(): Promise<Stats>;
 }
 
+export interface Stats {
+  count: number;
+  pinned: number;
+  /** How many memories have a vector from each model ("none" for no vector). */
+  models: Record<string, number>;
+}
 
 interface Prepared {
   text: string;
@@ -85,6 +98,8 @@ export function createMemory(options: MemoryOptions): FoxMemory {
   const now = options.now ?? Date.now;
   const recencyWeight = options.recencyWeight ?? 0.05;
   const halfLifeMs = options.halfLifeMs ?? 30 * DAY;
+  const maxItems = options.maxItems ?? 10_000;
+  const batchSize = options.batchSize ?? 32;
   let cache: { version: number | string; records: Map<string, StoredMemory> } = { version: Number.NaN, records: new Map() };
 
   /** The records, loaded again when another writer changed the store. */
@@ -140,6 +155,28 @@ export function createMemory(options: MemoryOptions): FoxMemory {
     return { text: kept, kind: meta.kind, source: meta.source, pinned: meta.pinned, expiresAt };
   }
 
+  /** Embed texts in batches. Every batch must come from one model. */
+  async function embedAll(texts: string[]) {
+    const vectors: Float32Array[] = [];
+    let model = "";
+    for (let i = 0; i < texts.length; i += batchSize) {
+      const reply = await embed(texts.slice(i, i + batchSize));
+      if (model && reply.model !== model) throw new FoxmemoryError("embed_failed", `The embedder changed from ${model} to ${reply.model} in one call. Try again.`);
+      model = reply.model;
+      vectors.push(...reply.vectors);
+    }
+    return { vectors, model };
+  }
+
+  /** Which unpinned records to evict so `all` fits, never one in `keep`. */
+  function evictions(all: Map<string, StoredMemory>, keep: Set<string>): string[] {
+    const over = all.size - maxItems;
+    if (over <= 0) return [];
+    const candidates = [...all.values()].filter((record) => !record.pinned && !keep.has(record.id)).toSorted((a, b) => a.updatedAt - b.updatedAt);
+    if (candidates.length < over) throw new FoxmemoryError("full", `The store keeps ${maxItems} memories at most, and the others are pinned or new. Unpin or forget some first.`);
+    return candidates.slice(0, over).map((record) => record.id);
+  }
+
   /** Under the lock: store prepared memories with their vectors in one write. */
   async function saveAll(items: Prepared[], vectors: Float32Array[], model: string): Promise<RememberResult[]> {
     const all = new Map(await current());
@@ -174,8 +211,9 @@ export function createMemory(options: MemoryOptions): FoxMemory {
       put.set(record.id, record);
       return { memory: view(record), deduped: same !== undefined };
     });
-    await write({ put: [...put.values()], remove: [] });
-    return results.map((result) => ({ ...result, evicted: [] }));
+    const evicted = evictions(all, new Set(put.keys()));
+    await write({ put: [...put.values()], remove: evicted });
+    return results.map((result) => ({ ...result, evicted }));
   }
 
   return {
@@ -184,6 +222,15 @@ export function createMemory(options: MemoryOptions): FoxMemory {
       const { vectors, model } = await embed([item.text]);
       const [result] = await store.lock(() => saveAll([item], vectors, model));
       return result!;
+    },
+
+    async rememberMany(items) {
+      if (!Array.isArray(items)) throw bad("rememberMany takes a list of { text, ...meta }.");
+      const prepared: Prepared[] = [];
+      for (const item of items) prepared.push(await prepare(item?.text, item));
+      if (prepared.length === 0) return [];
+      const { vectors, model } = await embedAll(prepared.map((item) => item.text));
+      return store.lock(() => saveAll(prepared, vectors, model));
     },
 
     async recall(query, recallOptions = {}) {
@@ -195,11 +242,20 @@ export function createMemory(options: MemoryOptions): FoxMemory {
       const q = vectors[0]!;
       return store.lock(async () => {
         const all = await current();
+        // Embed records from another model again, so two spaces never mix.
+        const stale = [...all.values()].filter((record) => record.model !== model || record.vector?.length !== q.length);
+        for (let i = 0; i < stale.length; i += batchSize) {
+          const batch = stale.slice(i, i + batchSize);
+          const fresh = await embed(batch.map((record) => record.text));
+          if (fresh.model !== model || fresh.vectors[0]!.length !== q.length) {
+            throw new FoxmemoryError("embed_failed", `The embedder changed from ${model} to ${fresh.model} while it embedded old memories again. Try again.`);
+          }
+          await write({ put: batch.map((record, j) => ({ ...record, model, vector: fresh.vectors[j]! })), remove: [] });
+        }
         const time = now();
         const hits: { record: StoredMemory; similarity: number; score: number }[] = [];
         for (const record of all.values()) {
-          // Never compare vectors from two models.
-          if (record.model !== model || record.vector?.length !== q.length) continue;
+          if (!record.vector) continue;
           if (recallOptions.kinds && !recallOptions.kinds.includes(record.kind)) continue;
           const similarity = dot(q, record.vector);
           if (similarity < minScore) continue;
@@ -266,6 +322,13 @@ export function createMemory(options: MemoryOptions): FoxMemory {
     async get(id) {
       const record = (await records()).get(id);
       return record && live(record) ? view(record) : undefined;
+    },
+
+    async stats() {
+      const all = [...(await records()).values()].filter(live);
+      const models: Record<string, number> = {};
+      for (const record of all) models[record.model ?? "none"] = (models[record.model ?? "none"] ?? 0) + 1;
+      return { count: all.length, pinned: all.filter((record) => record.pinned).length, models };
     },
   };
 }
