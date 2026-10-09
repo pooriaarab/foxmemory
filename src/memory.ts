@@ -262,11 +262,15 @@ export function createMemory(options: MemoryOptions): FoxMemory {
           if (fresh.model !== model || fresh.vectors[0]!.length !== q.length) {
             throw new FoxmemoryError("embed_failed", `The embedder changed from ${model} to ${fresh.model} while it embedded old memories again. Try again.`);
           }
-          await write({ put: batch.map((record, j) => ({ ...record, model, vector: fresh.vectors[j]! })), remove: [] });
+          // Read the store again: write back only memories that are still there.
+          const present = await current();
+          const put = batch.flatMap((record, j) => (present.get(record.id)?.text === record.text ? [{ ...present.get(record.id)!, model, vector: fresh.vectors[j]! }] : []));
+          if (put.length > 0) await write({ put, remove: [] });
         }
         const time = now();
+        const ranked = await current();
         const hits: { record: StoredMemory; similarity: number; score: number }[] = [];
-        for (const record of all.values()) {
+        for (const record of ranked.values()) {
           if (!record.vector) continue;
           if (recallOptions.kinds && !recallOptions.kinds.includes(record.kind)) continue;
           const similarity = dot(q, record.vector);
