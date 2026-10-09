@@ -11,8 +11,9 @@ Commands:
   search <store.json> <word> [word...]       Print the memories whose text has every word.
                                              This is a text match, not a search by meaning.
   export <store.json> [--vectors]            Print the memories as a foxmemory export file.
-  import <store.json> <file.json> [--replace]
-                                             Add the memories in an export file.
+  import <store.json> <file.json> [--replace] [--trust-vectors]
+                                             Add the memories in an export file. It drops the
+                                             file's vectors unless you trust the file.
   forget <store.json> <id>                   Delete one memory.
 `;
 
@@ -45,7 +46,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     }
     if (command === "export") io.out(`${JSON.stringify(await memory.exportAll({ vectors: flags.has("--vectors") }), null, 2)}\n`);
     if (command === "import") {
-      const result = await memory.importAll(await readFile(rest[0]!, "utf8"), { mode: flags.has("--replace") ? "replace" : "merge" });
+      const result = await memory.importAll(await readFile(rest[0]!, "utf8"), { mode: flags.has("--replace") ? "replace" : "merge", trustVectors: flags.has("--trust-vectors") });
       io.out(`Imported: added ${result.added}, updated ${result.updated}, skipped ${result.skipped}.\n`);
     }
     if (command === "forget") {

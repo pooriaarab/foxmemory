@@ -184,7 +184,7 @@ try {
     const modelLoadMs = performance.now() - t;
     const memories = Array.from({ length: 10_000 }, (_, n) => ({ id: `bulk-${n}`, text: `Bulk note ${n}`, kind: "fact", source: "e2e", createdAt: n, updatedAt: n, pinned: false, model: "Xenova/all-MiniLM-L6-v2", vector: vectors(n) }));
     t = performance.now();
-    await window.demo.memory.importAll({ format: "foxmemory", version: 1, exportedAt: 0, memories });
+    await window.demo.memory.importAll({ format: "foxmemory", version: 1, exportedAt: 0, memories }, { trustVectors: true });
     const importMs = performance.now() - t;
     t = performance.now();
     await window.demo.memory.recall("a note about the weather", { k: 5 });

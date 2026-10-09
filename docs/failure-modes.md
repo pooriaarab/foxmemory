@@ -25,7 +25,7 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F16 | A huge store makes recall slow. | 10,000 items recall in under 200 ms in Node, without the embed call. The E2E test measures it in Firefox. | `tests/models.test.ts`, E2E |
 | F17 | An import file is malformed: not JSON, wrong format, a bad field, a bad vector. | It fails with `bad_import`, and the message names the item and the field. Nothing is written. | `tests/exchange.test.ts` |
 | F18 | An import brings duplicates of stored memories. | Same id or same text: one record is kept. | `tests/exchange.test.ts` |
-| F19 | An import brings vectors from another model. | They are kept with their model id and embedded again at the next recall (F11). | `tests/exchange.test.ts` |
+| F19 | An import brings vectors from another model. | With `trustVectors: true`, they are kept with their model id and embedded again at the next recall (F11). | `tests/exchange.test.ts` |
 | F20 | An import skips the `redact` hook. | Imported text goes through `redact`. Text that changes loses its old vector. | `tests/exchange.test.ts` |
 | F21 | Export and import lose data. | A round trip keeps text, kind, source, dates and `pinned`. | `tests/exchange.test.ts`, E2E |
 | F22 | Two writers on one store file lose a write. | A lock file serializes writes, and each writer reloads a changed file before it writes. | `tests/file.test.ts` |
@@ -43,3 +43,7 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F34 | A writer that lost its lock deletes, or writes past, the new owner's lock. | It releases only a lock that holds its token. A write without its token fails with `locked`. | `tests/lock.test.ts` |
 | F35 | A re-embed batch writes back a memory that another writer deleted meanwhile. | Before each batch write, recall reads the store again and writes only ids that are still there. | `tests/lock.test.ts` |
 | F36 | A failed write or a crash leaves a temp file with every memory, deleted ones too, in plain text. | A failed write deletes its temp file. The next lock holder deletes old temp files of the store. | `tests/lock.test.ts` |
+| F37 | A hostile import file brings a crafted vector, so its memory ranks first for a chosen question (memory poisoning, then prompt injection). | importAll drops every imported vector unless the caller sets `trustVectors: true`. Recall embeds the text itself. | `tests/exchange.test.ts` |
+| F38 | An import file sets `updatedAt` far in the future, so its memory gets the full recency boost and is never evicted. | importAll sets `createdAt` and `updatedAt` to now at most. | `tests/exchange.test.ts` |
+| F39 | One import file holds the same id twice, and both count as added. | It fails with `bad_import` and names both items. | `tests/exchange.test.ts` |
+| F40 | In merge mode, an imported id matches a stored memory with other text, and the import replaces that memory. | The imported item gets a new id. The stored memory stays as it was. | `tests/exchange.test.ts` |

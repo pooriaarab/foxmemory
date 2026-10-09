@@ -70,5 +70,12 @@ export function parseExport(data: unknown): StoredMemory[] {
   if (!isObject(file) || file.format !== "foxmemory") throw bad('The file has no "format": "foxmemory" field, so it is not a foxmemory export.');
   if (file.version !== 1) throw bad(`The file has version ${String(file.version)}. This foxmemory reads version 1.`);
   if (!Array.isArray(file.memories)) throw bad('The file has no "memories" list.');
-  return file.memories.map((item, index) => toRecord(item, `memories[${index}]`));
+  const seen = new Map<string, number>();
+  return file.memories.map((item, index) => {
+    const record = toRecord(item, `memories[${index}]`);
+    const first = seen.get(record.id);
+    if (first !== undefined) throw bad(`memories[${index}].id repeats memories[${first}].id ("${record.id}"). Each id must be unique in one file.`);
+    seen.set(record.id, index);
+    return record;
+  });
 }

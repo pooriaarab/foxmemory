@@ -55,8 +55,12 @@ export interface FoxMemory {
   stats(): Promise<Stats>;
   /** Vectors are left out unless you ask for them. */
   exportAll(options?: { vectors?: boolean }): Promise<ExportFile>;
-  /** All or nothing: a malformed file fails with bad_import and writes nothing. */
-  importAll(data: unknown, options?: { mode?: "merge" | "replace" }): Promise<ImportResult>;
+  /**
+   * All or nothing: a malformed file fails with bad_import and writes nothing.
+   * Imported vectors are dropped unless `trustVectors` is true, so a crafted
+   * vector cannot push a memory to the top of recall.
+   */
+  importAll(data: unknown, options?: { mode?: "merge" | "replace"; trustVectors?: boolean }): Promise<ImportResult>;
 }
 
 export interface Stats {
@@ -353,7 +357,14 @@ export function createMemory(options: MemoryOptions): FoxMemory {
     },
 
     async importAll(data, importOptions = {}) {
-      const incoming = parseExport(data);
+      const time = now();
+      // Times come from the file, so no imported memory may claim to be newer than now.
+      const incoming = parseExport(data).map((record): StoredMemory => ({
+        ...record,
+        createdAt: Math.min(record.createdAt, time),
+        updatedAt: Math.min(record.updatedAt, time),
+        ...(importOptions.trustVectors === true ? {} : { model: null, vector: null }),
+      }));
       const kept: StoredMemory[] = [];
       let skipped = 0;
       for (const record of incoming) {
@@ -370,10 +381,12 @@ export function createMemory(options: MemoryOptions): FoxMemory {
         for (const record of kept) {
           const sameText = all.get(byKey.get(textKey(record.text)) ?? "");
           const sameId = all.get(record.id);
-          // Same text: keep the stored id and text. Same id: take the new fields, and the old vector when the text did not change.
-          const old = sameText ?? sameId;
+          // Same text: keep the stored id and text. Same id with the same text: take the new
+          // fields and keep the old vector. Same id with other text: a new memory with a new id.
+          const old = sameText ?? (sameId?.text === record.text ? sameId : undefined);
           let next = record;
           if (sameText) next = { ...record, id: sameText.id, text: sameText.text, pinned: sameText.pinned || record.pinned };
+          else if (sameId && !old) next = { ...record, id: crypto.randomUUID() };
           if (old && !next.vector && old.text === next.text) next = { ...next, model: old.model, vector: old.vector };
           if (!old) added++;
           all.set(next.id, next);

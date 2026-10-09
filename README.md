@@ -73,10 +73,16 @@ flowchart LR
 ```
 
 Each record keeps the id of the model that made its vector, and the vector's
-size. Recall compares only vectors from the query's model. When the model
-changes, recall embeds the old records again in batches before it ranks, and
-stores the new vectors, so two vector spaces never mix. Records without a
-vector (for example from an import without vectors) get one the same way.
+size. Recall compares only vectors that carry the query's model id. When the
+model changes, recall embeds the old records again in batches before it
+ranks, and stores the new vectors. Records without a vector get one the same
+way.
+
+foxmemory cannot check that a vector really comes from the model its id
+names. A crafted vector in an import file could push a chosen memory to the
+top of recall, and an agent could then follow text an attacker wrote. So
+`importAll` drops imported vectors unless you set `trustVectors: true`, and
+it sets imported times to now at most.
 
 Vectors are stored at unit length, so cosine similarity is one dot product per
 memory. Recall reads every memory: there is no index.
@@ -118,20 +124,21 @@ its copy is stale.
 | `memory.list({ kinds?, contains? })`, `memory.get(id)` | Reads memories, pinned first, then the newest. |
 | `memory.stats()` | `{ count, pinned, models }`, where `models` counts the vectors of each model. |
 | `memory.exportAll({ vectors? })` | A JSON object, `{ format: "foxmemory", version: 1, memories }`. Vectors are left out unless `vectors: true`. |
-| `memory.importAll(data, { mode? })` | Reads an export (object or JSON text). It checks the whole file before it writes. `mode` is `merge` (default) or `replace`. Returns `{ added, updated, skipped }`. |
+| `memory.importAll(data, { mode?, trustVectors? })` | Reads an export (object or JSON text). It checks the whole file before it writes, and refuses an id that appears twice. `mode` is `merge` (default) or `replace`. It drops the file's vectors unless `trustVectors` is true, sets `createdAt` and `updatedAt` to now at most, and gives an id that matches a stored memory with other text a new id. Returns `{ added, updated, skipped }`. |
 | `memoryStore()` | A store in this process's memory, for tests. |
 | `indexedDbStore(name)` | The browser store. Pages that use one name share the memories. |
 | `FoxmemoryError` | Every failure. `code` is one of `bad_input`, `not_found`, `redacted`, `embed_failed`, `full`, `bad_import`, `corrupt`, `locked`, `unavailable`. |
 
 The `redact(text, meta)` hook runs before the embedder sees a text, on
 `remember`, `update` and `importAll`. Return the text to keep, or `null` to
-refuse it.
+refuse it. Recall queries do not go through `redact`: the query goes to the
+embedder as it is, and foxmemory does not store it.
 
 ### `foxmemory/node`
 
 | Export | What it does |
 |---|---|
-| `fileStore(path, { staleMs?, waitMs? })` | A store in one JSON file. Writes go to a temp file and then rename. A lock file next to it keeps writers apart. A lock older than `staleMs` (default 10 s) is taken over. |
+| `fileStore(path, { staleMs?, waitMs? })` | A store in one JSON file. Writes go to a temp file and then rename. A lock file next to it keeps writers apart: it holds the holder's random token, and the holder refreshes its time while it works. A lock not refreshed for `staleMs` (default 10 s) is taken over. A writer without its token in the lock file cannot write. |
 
 ### CLI
 
@@ -141,7 +148,7 @@ The CLI works on a `fileStore` file. It does not embed text.
 npx foxmemory list memories.json
 npx foxmemory search memories.json sister      # text match, not by meaning
 npx foxmemory export memories.json > backup.json
-npx foxmemory import memories.json backup.json  # add --replace to replace all
+npx foxmemory import memories.json backup.json  # --replace replaces all; --trust-vectors keeps the file's vectors
 npx foxmemory forget memories.json <id>
 ```
 
@@ -166,9 +173,9 @@ foxmind on WASM or WebGPU. Build it with `pnpm build:ext` and load
 
 ## Tests
 
-`pnpm ci:local` runs lint, typecheck, 70 tests and the build. The tests use a
+`pnpm ci:local` runs lint, typecheck, 80 tests and the build. The tests use a
 fake embedder that gives the same vector for the same text.
-`docs/failure-modes.md` lists each failure mode (F1 to F31) and its test. The
+`docs/failure-modes.md` lists each failure mode (F1 to F40) and its test. The
 tests went in before the code.
 
 `pnpm e2e` starts Firefox with the demo extension, downloads the real MiniLM
@@ -223,7 +230,10 @@ average above 30), so treat the times as upper bounds:
 - An import that would pass `maxItems` fails with `full`. It does not evict
   other memories.
 - `fileStore` rewrites the whole file on each write. Its lock file works for
-  processes on one machine. We did not test it on network file systems.
+  processes on one machine. We did not test it on network file systems. A
+  holder that stops refreshing for `staleMs` (for example, a paused process)
+  loses the lock; its next write then fails with `locked`.
+- Recall queries do not go through the `redact` hook.
 - The CLI does not embed text, so `search` is a text match.
 - The demo loads the model in each Memory page. We tried the background page
   first: with a 2 s idle timeout, Firefox stopped it during a model load, and
