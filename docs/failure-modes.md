@@ -23,3 +23,8 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F14 | The embedder returns the wrong count, the wrong size, or `NaN`. | It fails with `embed_failed`. Nothing is stored. | `tests/models.test.ts` |
 | F15 | The store grows without a limit. | Over `maxItems`, the oldest unpinned items go first, and the result lists them. Pinned items never go. When all are pinned, the call fails with `full`. | `tests/models.test.ts` |
 | F16 | A huge store makes recall slow. | 10,000 items recall in under 200 ms in Node, without the embed call. The E2E test measures it in Firefox. | `tests/models.test.ts`, E2E |
+| F17 | An import file is malformed: not JSON, wrong format, a bad field, a bad vector. | It fails with `bad_import`, and the message names the item and the field. Nothing is written. | `tests/exchange.test.ts` |
+| F18 | An import brings duplicates of stored memories. | Same id or same text: one record is kept. | `tests/exchange.test.ts` |
+| F19 | An import brings vectors from another model. | They are kept with their model id and embedded again at the next recall (F11). | `tests/exchange.test.ts` |
+| F20 | An import skips the `redact` hook. | Imported text goes through `redact`. Text that changes loses its old vector. | `tests/exchange.test.ts` |
+| F21 | Export and import lose data. | A round trip keeps text, kind, source, dates and `pinned`. | `tests/exchange.test.ts`, E2E |

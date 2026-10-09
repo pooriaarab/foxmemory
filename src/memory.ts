@@ -15,6 +15,7 @@ import {
   type Store,
   type StoredMemory,
 } from "./types.js";
+import { type ExportFile, parseExport, toExport } from "./exchange.js";
 import { checkVectors, dot } from "./vector.js";
 
 const DAY = 86_400_000;
@@ -52,6 +53,10 @@ export interface FoxMemory {
   list(options?: ListOptions): Promise<Memory[]>;
   get(id: string): Promise<Memory | undefined>;
   stats(): Promise<Stats>;
+  /** Vectors are left out unless you ask for them. */
+  exportAll(options?: { vectors?: boolean }): Promise<ExportFile>;
+  /** All or nothing: a malformed file fails with bad_import and writes nothing. */
+  importAll(data: unknown, options?: { mode?: "merge" | "replace" }): Promise<ImportResult>;
 }
 
 export interface Stats {
@@ -59,6 +64,13 @@ export interface Stats {
   pinned: number;
   /** How many memories have a vector from each model ("none" for no vector). */
   models: Record<string, number>;
+}
+
+export interface ImportResult {
+  added: number;
+  updated: number;
+  /** Expired items, and items the redact hook refused. */
+  skipped: number;
 }
 
 interface Prepared {
@@ -329,6 +341,45 @@ export function createMemory(options: MemoryOptions): FoxMemory {
       const models: Record<string, number> = {};
       for (const record of all) models[record.model ?? "none"] = (models[record.model ?? "none"] ?? 0) + 1;
       return { count: all.length, pinned: all.filter((record) => record.pinned).length, models };
+    },
+
+    async exportAll(exportOptions = {}) {
+      const all = [...(await records()).values()].filter(live);
+      return toExport(all, exportOptions.vectors === true, now());
+    },
+
+    async importAll(data, importOptions = {}) {
+      const incoming = parseExport(data);
+      const kept: StoredMemory[] = [];
+      let skipped = 0;
+      for (const record of incoming) {
+        const text = record.expiresAt !== undefined && record.expiresAt <= now() ? null : options.redact ? await options.redact(record.text, { kind: record.kind, source: record.source }) : record.text;
+        if (typeof text !== "string" || !text.trim()) skipped++;
+        else kept.push(text.trim() === record.text ? record : { ...record, text: text.trim(), model: null, vector: null });
+      }
+      return store.lock(async () => {
+        const replace = importOptions.mode === "replace";
+        const all = new Map(replace ? [] : await current());
+        const byKey = new Map([...all.values()].map((record) => [textKey(record.text), record.id]));
+        const put = new Map<string, StoredMemory>();
+        let added = 0;
+        for (const record of kept) {
+          const sameText = all.get(byKey.get(textKey(record.text)) ?? "");
+          const sameId = all.get(record.id);
+          // Same text: keep the stored id and text. Same id: take the new fields, and the old vector when the text did not change.
+          const old = sameText ?? sameId;
+          let next = record;
+          if (sameText) next = { ...record, id: sameText.id, text: sameText.text, pinned: sameText.pinned || record.pinned };
+          if (old && !next.vector && old.text === next.text) next = { ...next, model: old.model, vector: old.vector };
+          if (!old) added++;
+          all.set(next.id, next);
+          byKey.set(textKey(next.text), next.id);
+          put.set(next.id, next);
+        }
+        if (all.size > maxItems) throw new FoxmemoryError("full", `The import would make ${all.size} memories, over the cap of ${maxItems}. Nothing was imported.`);
+        await write({ put: [...put.values()], remove: [], clear: replace });
+        return { added, updated: kept.length - added, skipped };
+      });
     },
   };
 }

@@ -31,3 +31,27 @@ export function checkVectors(reply: unknown, count: number): { vectors: Float32A
   });
   return { vectors: out, model };
 }
+
+/** A Float32 vector as base64, for JSON files. */
+export function toBase64(vector: Float32Array): string {
+  const bytes = new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** Base64 to a Float32 vector, or undefined when the text is not one. */
+export function fromBase64(text: unknown): Float32Array | undefined {
+  if (typeof text !== "string") return undefined;
+  let binary: string;
+  try {
+    binary = atob(text);
+  } catch {
+    return undefined;
+  }
+  if (binary.length === 0 || binary.length % 4 !== 0) return undefined;
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const vector = new Float32Array(bytes.buffer);
+  return vector.every(Number.isFinite) ? vector : undefined;
+}
