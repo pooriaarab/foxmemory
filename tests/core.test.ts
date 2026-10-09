@@ -151,3 +151,88 @@ describe("recall (F8, F9)", () => {
     expect(second!.score - second!.similarity).toBeLessThanOrEqual(0.05);
   });
 });
+
+describe("forget (F3, F4)", () => {
+  it("removes the record and its vector", async () => {
+    const { memory, store } = setup();
+    const { memory: saved } = await memory.remember("My locker code is 4411");
+    expect(await memory.forget(saved.id)).toBe(true);
+    const left = await store.load();
+    expect(left.find((record) => record.id === saved.id)).toBeUndefined();
+    expect(JSON.stringify(left)).not.toContain("4411");
+    expect(await memory.recall("locker code")).toEqual([]);
+    expect(await memory.forget(saved.id)).toBe(false);
+  });
+
+  it("forgetWhere removes only the matching items", async () => {
+    const { memory } = setup();
+    await memory.remember("From page a", { source: "https://a.example" });
+    await memory.remember("Also from page a", { source: "https://a.example", pinned: true });
+    await memory.remember("From the user");
+    expect(await memory.forgetWhere({ source: "https://a.example", pinned: false })).toBe(1);
+    expect(await memory.forgetWhere({ source: "https://a.example" })).toBe(1);
+    expect((await memory.list()).map((item) => item.text)).toEqual(["From the user"]);
+  });
+
+  it("forgetWhere matches kinds, text and age", async () => {
+    const { memory, time } = setup();
+    await memory.remember("Old task", { kind: "task-note" });
+    time.advance(DAY);
+    await memory.remember("New task", { kind: "task-note" });
+    await memory.remember("Old fact");
+    expect(await memory.forgetWhere({ kinds: ["task-note"], before: time.time.now })).toBe(1);
+    expect(await memory.forgetWhere({ contains: "FACT" })).toBe(1);
+    expect((await memory.list()).map((item) => item.text)).toEqual(["New task"]);
+  });
+
+  it("refuses an empty filter, and clear() deletes all", async () => {
+    const { memory } = setup();
+    await memory.remember("Keep me");
+    expect(await code(memory.forgetWhere({}))).toBe("bad_input");
+    expect(await memory.list()).toHaveLength(1);
+    await memory.clear();
+    expect(await memory.list()).toEqual([]);
+  });
+});
+
+describe("redact on update (F5)", () => {
+  it("runs on update too", async () => {
+    const { memory } = setup({ redact: (text) => text.replace("secret", "[x]") });
+    const { memory: saved } = await memory.remember("Plain text");
+    const updated = await memory.update(saved.id, { text: "A secret plan" });
+    expect(updated.text).toBe("A [x] plan");
+  });
+});
+
+describe("update (F6, F10)", () => {
+  it("embeds a new text again", async () => {
+    const { memory, embedder } = setup();
+    const { memory: saved } = await memory.remember("Meeting is on Monday");
+    await memory.update(saved.id, { text: "Meeting moved to Thursday" });
+    expect(embedder.calls.at(-1)).toEqual(["Meeting moved to Thursday"]);
+    const [hit] = await memory.recall("moved to thursday");
+    expect(hit?.memory.text).toBe("Meeting moved to Thursday");
+  });
+
+  it("does not call the embedder for a pin change", async () => {
+    const { memory, embedder, time } = setup();
+    const { memory: saved } = await memory.remember("Pin me");
+    const before = embedder.calls.length;
+    time.advance(5);
+    const updated = await memory.update(saved.id, { pinned: true, kind: "preference", expiresAt: null });
+    expect(embedder.calls.length).toBe(before);
+    expect(updated).toMatchObject({ pinned: true, kind: "preference", updatedAt: saved.updatedAt + 5 });
+  });
+
+  it("fails with not_found for an unknown id", async () => {
+    const { memory } = setup();
+    expect(await code(memory.update("nope", { pinned: true }))).toBe("not_found");
+  });
+
+  it("refuses a text that another memory already has", async () => {
+    const { memory } = setup();
+    await memory.remember("Alpha");
+    const { memory: beta } = await memory.remember("Beta");
+    expect(await code(memory.update(beta.id, { text: "alpha" }))).toBe("bad_input");
+  });
+});
