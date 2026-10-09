@@ -1,2 +1,4 @@
-// The public API of foxmemory. Replace this export with the real one.
-export const name = "foxmemory";
+export { createMemory, type FoxMemory, type MemoryOptions } from "./memory.js";
+export { memoryStore } from "./memory-store.js";
+export { FoxmemoryError, type FoxmemoryCode } from "./errors.js";
+export * from "./types.js";
