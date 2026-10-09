@@ -13,6 +13,9 @@ in Node. The user can list, change, pin, export and delete each one.
 npm i foxmemory
 ```
 
+Install the add-on from AMO: [addons.mozilla.org/firefox/addon/foxmemory](https://addons.mozilla.org/firefox/addon/foxmemory/)
+(pending AMO review; the link works after approval).
+
 ## Example
 
 This example runs in Node 24 or later. It gets embeddings from a local

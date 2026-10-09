@@ -1,0 +1,28 @@
+{
+  "default_locale": "en-US",
+  "slug": "foxmemory",
+  "name": {
+    "en-US": "foxmemory — memory for AI that you control"
+  },
+  "summary": {
+    "en-US": "A local memory for AI agents. Add facts and preferences, find them again by meaning, and read, edit, pin, export or delete each one. The embedding model runs in your browser, and the memories stay on this device."
+  },
+  "description": {
+    "en-US": "foxmemory is the reference add-on for the foxmemory library. It shows a memory for an AI agent that the user owns.\n\n**Who it is for:** people who want to see and control what an AI agent remembers about them, and developers who build agents with local memory.\n\n**What it does**\n\n- Opens a Memory page when you click the toolbar button.\n- Adds a memory as a fact, a preference or a task note. You can pin a memory.\n- Finds memories by meaning: ask \"what milk do I like?\" and it finds \"I take my coffee with oat milk\".\n- Lets you read, edit, filter and delete each memory, or delete all of them.\n- Exports the memories to a JSON file, and imports them again.\n\n**What leaves your computer:** no memory and no query. The embedding model (all-MiniLM-L6-v2) runs in the browser with WebAssembly. Firefox downloads its files from Hugging Face one time and keeps them in the cache; that download holds none of your data. The memories stay in the browser's IndexedDB. The add-on has no server and no analytics.\n\n**Permissions**\n\n- Unlimited storage: the model files and many memories can pass the normal storage limit.\n\nThe source code is MIT licensed."
+  },
+  "categories": {
+    "firefox": [
+      "privacy-security"
+    ]
+  },
+  "homepage": {
+    "en-US": "https://github.com/pooriaarab/foxmemory"
+  },
+  "support_url": {
+    "en-US": "https://github.com/pooriaarab/foxmemory/issues"
+  },
+  "version": {
+    "license": "MIT",
+    "approval_notes": "The uploaded source.zip is the git tree of this release. To build: install Node 24 and pnpm 11 (corepack enable), run `pnpm install --frozen-lockfile`, then `pnpm build:ext`. The output is dist-ext/. esbuild bundles extension/*.js with src/, foxmind and transformers.js; the ONNX Runtime WASM files in dist-ext/ort/ are copied unmodified from the onnxruntime-web npm package. To try it: click the toolbar button, add a memory such as \"I take my coffee with oat milk\", then search \"what milk do I like?\" under Find a memory. The first search downloads the MiniLM model files from Hugging Face. No account is needed."
+  }
+}

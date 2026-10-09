@@ -1,6 +1,6 @@
 {
   "name": "foxmemory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local memory for AI agents that the user can read, edit, and delete.",
   "type": "module",
   "license": "MIT",
@@ -35,9 +35,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings",
     "test": "vitest run --passWithNoTests",
-    "ci:local": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm build:ext && pnpm lint:ext",
+    "ci:local": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm build:ext && pnpm lint:ext && pnpm check:amo",
     "build:ext": "node scripts/build-ext.mjs",
     "lint:ext": "web-ext lint -s dist-ext",
+    "check:amo": "node scripts/amo-listing.mjs check",
     "e2e": "pnpm build:ext && node e2e/run.mjs"
   },
   "devDependencies": {
