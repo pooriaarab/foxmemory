@@ -35,3 +35,6 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F26 | Two extension pages write to one IndexedDB store at once. | Web Locks serialize the writes. No record is lost and no duplicate is stored. | `tests/idb.test.ts`, E2E |
 | F27 | A page keeps a stale copy after another page writes. | Each call checks the store version and reloads when it changed. | `tests/idb.test.ts`, E2E |
 | F28 | IndexedDB cannot open (for example, the profile blocks storage). | It fails with `unavailable` and the browser's reason. | `tests/idb.test.ts` |
+| F29 | Firefox stops an idle background page even while it owes a reply, so a slow model load there fails with "Receiving end does not exist". | The demo runs the model in the Memory page, not in the background page. A cold load with a 2 s background timeout still works. | E2E |
+| F30 | Recall by meaning does not work with a real model. | 20 facts with MiniLM: each paraphrased question finds its fact in the top 3. | E2E |
+| F31 | An edit or a delete on the Memory page does not last. | After a reload, the page shows the edit and not the deleted memory. | E2E |
