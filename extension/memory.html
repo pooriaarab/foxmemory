@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Memory</title>
+    <link rel="stylesheet" href="memory.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Memory</h1>
+      <p>Everything the agent remembers about you. You can read, change, and delete each item. Nothing leaves this device.</p>
+      <p id="stats" class="muted">Loading…</p>
+    </header>
+
+    <main>
+      <section aria-labelledby="add-title">
+        <h2 id="add-title">Add a memory</h2>
+        <form id="add">
+          <textarea id="new-text" rows="2" placeholder="For example: I take my coffee with oat milk." required></textarea>
+          <div class="row">
+            <select id="new-kind" aria-label="Kind">
+              <option value="fact">Fact</option>
+              <option value="preference">Preference</option>
+              <option value="task-note">Task note</option>
+            </select>
+            <label><input id="new-pinned" type="checkbox" /> Pin</label>
+            <button type="submit">Add</button>
+          </div>
+        </form>
+      </section>
+
+      <section aria-labelledby="recall-title">
+        <h2 id="recall-title">Test recall</h2>
+        <form id="recall" class="row">
+          <input id="query" type="search" placeholder="Ask in your own words: what milk do I like?" required />
+          <button type="submit">Recall</button>
+        </form>
+        <ol id="hits"></ol>
+      </section>
+
+      <section aria-labelledby="list-title">
+        <div class="row between">
+          <h2 id="list-title">All memories</h2>
+          <div class="row">
+            <button id="export" type="button">Export</button>
+            <label class="button">Import<input id="import" type="file" accept="application/json" hidden /></label>
+            <button id="clear" type="button" class="danger">Delete all</button>
+          </div>
+        </div>
+        <input id="search" type="search" placeholder="Filter by text" aria-label="Filter by text" />
+        <ul id="list"></ul>
+      </section>
+    </main>
+
+    <p id="status" role="status" class="muted"></p>
+    <script type="module" src="memory.js"></script>
+  </body>
+</html>
