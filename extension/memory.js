@@ -16,7 +16,7 @@ const KIND_NAMES = { fact: "Fact", preference: "Preference", "task-note": "Task 
 
 function say(text, isError = false) {
   $("status").textContent = text;
-  $("status").style.color = isError ? "var(--danger)" : "";
+  $("status").classList.toggle("bad", isError);
 }
 
 async function attempt(action) {
