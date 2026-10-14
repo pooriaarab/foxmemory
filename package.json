@@ -1,6 +1,6 @@
 {
   "name": "foxmemory",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Local AI agent memory for JavaScript with semantic recall, editable records, IndexedDB and Node.js JSON storage, and foxmind embeddings.",
   "type": "module",
   "license": "MIT",
