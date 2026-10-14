@@ -1,116 +1,116 @@
 # foxmemory
 
-Local memory for AI agents that the user can read, edit, and delete.
+[![npm version](https://img.shields.io/npm/v/foxmemory)](https://www.npmjs.com/package/foxmemory)
+[![Downloads/month](https://img.shields.io/npm/dm/foxmemory)](https://www.npmjs.com/package/foxmemory)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://opensource.org/license/mit)
+[![Runtime dependencies: 0](https://img.shields.io/badge/runtime_dependencies-0-green)](https://www.npmjs.com/package/foxmemory)
 
-foxmemory stores what an agent learns about a person: facts, preferences and
-task notes. It finds them again by meaning, with embeddings from a model on
-the same device. Memories stay in IndexedDB in the browser or in a JSON file
-in Node. The user can list, change, pin, export and delete each one.
+[Quickstart](#remember-your-first-preference) · [API reference](#runtime-surfaces) · [Storage coverage](#coverage) · [FAQ](#faq)
+
+foxmemory is an open-source local memory library for JavaScript AI agents that stores user-editable facts, preferences, and task notes.
+It ranks memories with embeddings from an embedder you supply.
+It supports browser IndexedDB, Node.js JSON files, and in-process memory.
 
 ## Install
 
 ```bash
-npm i foxmemory
+npm install foxmemory
 ```
 
-Install the add-on from AMO: [addons.mozilla.org/firefox/addon/foxmemory](https://addons.mozilla.org/firefox/addon/foxmemory/)
-(pending AMO review; the link works after approval).
+Node.js 24 or later is required for the Node.js entry point and CLI.
+The library includes TypeScript declarations and has zero runtime dependencies.
+Browser storage needs IndexedDB and Web Locks.
 
-## Example
+## Remember your first preference
 
-This example runs in Node 24 or later. It gets embeddings from a local
-Ollama server through [foxmind](https://github.com/pooriaarab/foxmind), so
-first run `npm i foxmind` and `ollama pull all-minilm`.
+Save this as `example.mjs` and run `node example.mjs`.
+This deterministic embedder demonstrates storage and recall; it is not a language model.
+No environment variables, API keys, or `.env` file are needed.
 
 ```js
-import { createMind, ollama } from "foxmind";
-import { createMemory } from "foxmemory";
-import { fileStore } from "foxmemory/node";
+import { createMemory, memoryStore } from "foxmemory";
 
 const memory = createMemory({
-  store: fileStore("memories.json"),
-  // Memories are private, so the router may use only local models.
-  embedder: createMind({ providers: [ollama({ model: "all-minilm" })], only: ["browser", "local"] }),
+  store: memoryStore(),
+  embedder: {
+    async embed(texts) {
+      return { model: "coffee-demo-v1", vectors: texts.map(() => [1, 0]) };
+    },
+  },
 });
-
 await memory.remember("I take my coffee with oat milk.", { kind: "preference" });
-await memory.remember("My sister lives in Vancouver.");
 const [hit] = await memory.recall("How do I like my coffee?");
-console.log(hit.memory.text, hit.similarity.toFixed(2));
+console.log(hit.memory.text);
 ```
 
-Output on our test machine:
-
-```text
-I take my coffee with oat milk. 0.57
-```
-
-In a Firefox extension page, use `indexedDbStore("memories")` as the store
-and foxmind's in-browser model,
-`createMind({ providers: [transformers({ task: "embed" })], only: ["browser", "local"] })`.
-The demo extension does this. With `only`, foxmind never calls a cloud model,
-so no memory text leaves the device through the embedder.
-
-## Use cases
-
-| Who | What they build | How foxmemory helps |
-|---|---|---|
-| A builder of a personal agent (for example foxmate) | An agent that remembers your diet, your family and your open tasks | `remember` and `recall` find a fact by meaning, and the user can see and delete each one on a Memory page. |
-| A note-taking extension developer | Notes that you search in your own words | `recall("what did I save about tax forms?")` ranks notes by meaning. `list({ contains })` filters by text. |
-| A support assistant team | A helper that remembers each customer's setup between chats | Each memory has a `source`, such as a conversation id. `forgetWhere({ source })` deletes one customer's memories when they ask. |
-| A reader who saves web pages | Local search over saved pages (local RAG) | Store page passages with the page URL as `source`, then `recall` the passages for a question. Nothing goes to a server. |
-| Any app that wants user-editable AI memory | A memory that users can trust | `exportAll` gives a JSON file the user can read. `importAll` checks every field before it writes. `redact` removes secrets before they are stored. |
-| A command-line agent or script | Memory that lasts between runs | `fileStore` keeps memories in one JSON file, safe for two processes. The `foxmemory` CLI lists, exports and edits that file. |
+Success prints `I take my coffee with oat milk.`
+For semantic search, replace the demo embedder with a model such as Ollama through foxmind.
+Use a local provider policy if memory text must stay on your device.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  subgraph remember["remember(text, meta)"]
-    R1["check input"] --> R2["redact hook"] --> R3["embedder.embed"] --> R4["dedupe by exact text"] --> R5["evict oldest unpinned over maxItems"] --> R6[("store: IndexedDB or JSON file")]
-  end
-  subgraph recall["recall(query)"]
-    Q1["embedder.embed(query)"] --> Q2["delete expired"] --> Q3["embed again records from another model"] --> Q4["cosine similarity + small recency boost"] --> Q5["top k hits"]
-  end
-  R6 -.-> Q2
+```text
+Text -> optional redact hook -> embedder -> deduplicate -> store
+Query -> embedder -> refresh stale vectors -> cosine score + recency -> top k
 ```
 
-Each record keeps the id of the model that made its vector, and the vector's
-size. Recall compares only vectors that carry the query's model id. When the
-model changes, recall embeds the old records again in batches before it
-ranks, and stores the new vectors. Records without a vector get one the same
-way.
+Recall scans all stored vectors.
+A model or dimension change causes old records to receive new embeddings.
+Writes use the store's lock and version to coordinate writers.
 
-foxmemory cannot check that a vector really comes from the model its id
-names. A crafted vector in an import file could push a chosen memory to the
-top of recall, and an agent could then follow text an attacker wrote. So
-`importAll` drops imported vectors unless you set `trustVectors: true`, and
-it sets imported times to now at most.
+## Why it exists
 
-Vectors are stored at unit length, so cosine similarity is one dot product per
-memory. Recall reads every memory: there is no index.
+Agents need memories that users can inspect, correct, export, and delete.
+Mem0 provides a memory engine; LangGraph provides memory stores within its agent framework.
+foxmemory supplies explicit record operations and local storage without an agent framework or database service.
+Your application decides what to remember and which embedder to call.
 
-```mermaid
-sequenceDiagram
-  participant A as Memory page A
-  participant B as Memory page B
-  participant L as Web Locks
-  participant DB as IndexedDB
-  A->>L: request "foxmemory:demo"
-  B->>L: request "foxmemory:demo" (waits)
-  A->>DB: read version; reload if changed
-  A->>DB: write records, version + 1 (one transaction)
-  A-->>L: release
-  L-->>B: granted
-  B->>DB: version changed, so reload, then dedupe and write
-  A-->>B: BroadcastChannel "changed": draw the list again
-```
+## Compare
 
-Every write runs under a lock: Web Locks in the browser, a lock file in Node.
-A version number changes on every write, so each page or process knows when
-its copy is stale.
+Scope checked on 2026-10-14 against [Mem0 documentation](https://github.com/mem0ai/mem0/blob/main/docs/open-source/overview.mdx)
+and [LangGraph documentation](https://github.com/langchain-ai/langgraphjs/blob/main/docs/docs/concepts/memory.md).
 
-## API
+| Property | foxmemory | Mem0 open source | LangGraph memory |
+|---|---|---|---|
+| Scope | Explicit records and vector recall | Agent memory engine | Memory stores for graph applications |
+| Deployment | Library in your browser or Node.js process | Library or self-hosted server | Store inside an application |
+| Configuration | Store and embedder objects | Memory engine configuration | Namespaces, keys, and store configuration |
+| Storage coverage | IndexedDB, JSON file, process memory | Configurable backend stack | JSON documents in a store |
+
+## Coverage
+
+The source exports three implemented storage adapters.
+The embedder is an interface, not a registry of model providers.
+
+| Surface | Status | Implementation |
+|---|---|---|
+| Browser IndexedDB | ✓ | `indexedDbStore`; Web Locks coordinates writes |
+| Node.js JSON file | ✓ | `fileStore` from `foxmemory/node`; lock file and atomic rename |
+| In-process memory | ✓ | `memoryStore`; data ends with the process |
+| foxmind | ✓ | Its `embed` reply matches the embedder interface |
+| Ollama | Pending live verification | Caller supplies a foxmind provider; no built-in adapter |
+| Hugging Face Transformers.js | Demo integration | Firefox demo uses MiniLM through foxmind |
+
+Storage and embedder behavior have local automated tests.
+This rewrite does not credential-check a model service or verify WebGPU execution.
+No storage adapter above is a scaffold.
+
+## Common use cases
+
+1. Firefox extension developers store editable preferences in IndexedDB with MiniLM through foxmind.
+2. Node.js agent developers persist task notes in JSON and export backups with the foxmemory CLI.
+3. foxmate builders recall user facts and expose a Memory page for corrections.
+4. Ollama application developers provide local embeddings for search over saved passages.
+
+## Features
+
+- **Editable records:** remember, list, update, pin, and delete memories through the [API](#runtime-surfaces).
+- **Ranked recall:** cosine similarity, recency weighting, kind filters, and score thresholds; see [limits](#delivery-and-behavior-limits).
+- **Retention:** expiry and eviction of old unpinned records within `maxItems`; see the [API](#runtime-surfaces).
+- **Portable exports:** JSON import and export; imported vectors are discarded by default.
+- **Redaction hook:** transform or refuse stored text before embedding; recall queries bypass this hook.
+
+## Runtime surfaces
 
 ### `foxmemory`
 
@@ -174,49 +174,7 @@ imports a JSON file. It runs MiniLM (`Xenova/all-MiniLM-L6-v2`) through
 foxmind on WASM or WebGPU. Build it with `pnpm build:ext` and load
 `dist-ext/manifest.json` from `about:debugging`.
 
-## Tests
-
-`pnpm ci:local` runs lint, typecheck, 80 tests and the build. The tests use a
-fake embedder that gives the same vector for the same text.
-`docs/failure-modes.md` lists each failure mode (F1 to F40) and its test. The
-tests went in before the code.
-
-`pnpm e2e` starts Firefox with the demo extension, downloads the real MiniLM
-model, and uses the Memory page. It writes `artifacts/e2e-<date>.json`.
-Results from our run on 2026-10-09 (Firefox 157.0.1, Apple M3 Pro, headless,
-so WASM; all 12 checks passed). The machine was under heavy load (load
-average above 30), so treat the times as upper bounds:
-
-| Check | Result |
-|---|---|
-| 20 facts through the add form: first one with model download / the next ones (median) | 2.7 s / 221 ms |
-| 20 questions in other words: fact in the top 1 / in the top 3 | 20 of 20 / 20 of 20 |
-| One recall in the page (median) | 15 ms |
-| Edit, delete and pin, then reload the page | all kept |
-| Two pages write 11 memories each at once, one text in both | 21 new memories, no loss, no duplicate |
-| Export, delete all, import; the next recall embeds all 41 again | 41 back; 1.1 s |
-| 10,000 memories in IndexedDB: import / first recall in a new page (it loads all 10,000) / next recall | 6.9 s / 1.3 s / 82 ms |
-| Cold model load with a 2 s background idle timeout, then 8 s idle, then recall | works (13 s for that recall on the loaded machine) |
-
-## Firefox APIs used
-
-| API | MDN | Why |
-|---|---|---|
-| IndexedDB | [MDN](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API) | `indexedDbStore` keeps the records and a version number. Each write is one transaction. |
-| Web Locks (`navigator.locks`) | [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API) | One page writes at a time, so two open Memory pages lose nothing. |
-| BroadcastChannel | [MDN](https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel) | After an edit, every other open Memory page draws the list again. |
-| `unlimitedStorage` | [MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/permissions#unlimitedstorage) | The model files and many memories can pass the normal storage limit. |
-| `action` and `tabs.create` | [MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/action/onClicked) | The toolbar button opens the Memory page. |
-| `runtime.getURL` | [MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/runtime/getURL) | Gives the Memory page's URL, and (through foxmind) the place of ONNX Runtime's WASM files in the extension. |
-| Background scripts (event page) | [MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Background_scripts) | Only listens for the toolbar button. The model runs in the page, because Firefox stops an idle background page even while it owes a reply. |
-| `content_security_policy` with `'wasm-unsafe-eval'` | [MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/content_security_policy) | Lets the page compile WebAssembly for the model. |
-| WebAssembly | [MDN](https://developer.mozilla.org/en-US/docs/WebAssembly) | ONNX Runtime runs MiniLM on the CPU when there is no WebGPU. |
-| Cache Storage (`caches`) | [MDN](https://developer.mozilla.org/en-US/docs/Web/API/CacheStorage) | transformers.js caches the model files, so the next load needs no download. |
-| `crypto.randomUUID` | [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/randomUUID) | The id of each memory. |
-| `Blob`, `URL.createObjectURL`, `File.text` | [MDN](https://developer.mozilla.org/en-US/docs/Web/API/URL/createObjectURL_static) | Export downloads a JSON file. Import reads the file the user picks. |
-| `browser_specific_settings.gecko.data_collection_permissions` | [MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/browser_specific_settings) | The demo collects no data: `required: ["none"]`. |
-
-## Limits
+## Delivery and behavior limits
 
 - Recall reads every memory. There is no vector index. We measured 10,000
   memories; we did not test 100,000.
@@ -245,26 +203,72 @@ average above 30), so treat the times as upper bounds:
 - We ran the E2E test in headless Firefox 157 on macOS, so on WASM. We did not
   run it with WebGPU.
 
-## Part of the fox primitives
+## Integration guides
 
-```mermaid
-flowchart LR
-  foxkit[foxkit] -- template --> foxmemory[foxmemory]
-  foxmind[foxmind] -- embeddings --> foxmemory
-  foxvault[foxvault] -. redact hook, planned .-> foxmemory
-  foxmemory --> foxmate[foxmate]
-  click foxkit "https://github.com/pooriaarab/foxkit"
-  click foxmind "https://github.com/pooriaarab/foxmind"
-  click foxvault "https://github.com/pooriaarab/foxvault"
-  click foxmemory "https://github.com/pooriaarab/foxmemory"
-  click foxmate "https://github.com/pooriaarab/foxmate"
+- [Node.js persistent agent memory](#foxmemorynode): use `fileStore` with your embedder.
+- [Firefox extension memory](#demo-extension): use IndexedDB and Web Locks.
+- [CLI backup and deletion](#cli): list, search, export, import, and forget JSON-file records.
+
+## Status
+
+foxmemory is a 0.x package; its API and export behavior can change before 1.0.
+Report problems through [GitHub issues](https://github.com/pooriaarab/foxmemory/issues).
+Public case studies are not yet published.
+The demo extension is a development surface; this README does not claim an approved add-on listing.
+
+## FAQ
+
+### What is foxmemory?
+
+foxmemory is a local memory library for JavaScript agents.
+It stores explicit records and ranks them with caller-supplied embeddings.
+
+### Which integrations are verified?
+
+foxmemory tests its three stores and embedding contract locally.
+This rewrite does not verify a live Ollama server or WebGPU execution.
+
+### Does foxmemory provide a managed memory service?
+
+foxmemory runs in your application.
+You supply storage and an embedder; it provides no managed service.
+
+### How is foxmemory different from Mem0?
+
+foxmemory exposes explicit record operations with three local stores.
+[Mem0](https://github.com/mem0ai/mem0/blob/main/docs/open-source/overview.mdx) supplies a memory engine that can run as a library or self-hosted server.
+
+### How is foxmemory different from LangGraph?
+
+foxmemory works without a graph runtime.
+[LangGraph](https://github.com/langchain-ai/langgraphjs/blob/main/docs/docs/concepts/memory.md) organizes long-term memories as namespaced JSON documents in stores.
+
+### Does foxmemory send memories to a cloud model?
+
+foxmemory calls the embedder you provide.
+Choose a local embedder to keep text on your device; the library does not enforce that choice.
+
+### Are foxmemory records encrypted?
+
+foxmemory stores plain text in its built-in persistent stores.
+Provide your own storage protection and redaction policy for sensitive data.
+
+### Does the foxmemory CLI perform semantic search?
+
+foxmemory CLI search matches text words.
+Semantic recall needs the library API and an embedder.
+
+## Development
+
+```bash
+pnpm install
+pnpm ci:local
+pnpm e2e
 ```
 
-foxmemory itself has no runtime dependency. The demo extension and the E2E
-test use [foxmind](https://github.com/pooriaarab/foxmind) for the embedding
-model. [foxmate](https://github.com/pooriaarab/foxmate) will use foxmemory as
-its memory.
+The local gate checks lint, types, tests, builds, and the extension listing.
+The separate end-to-end command starts Firefox and downloads the demo embedding model.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://opensource.org/license/mit)
