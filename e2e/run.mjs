@@ -209,6 +209,53 @@ try {
   check("10,000 memories: the first recall in a new page, model loaded, under 2 s (F16)", record.timings.bulk.coldPageRecallMs < 2000, record.timings.bulk);
   await fresh.close();
   await bulk.close();
+
+  // F41: 256 records of mixed length embed in under 60 s, and each stored vector
+  // is the vector of its own text, so the order is restored. MiniLM runs as q8,
+  // which scales activations per batch, so a vector differs a little (about
+  // 0.03 per value) from the one embedded alone. Compare by cosine and by rank.
+  const mixed = await memoryPage(fox, "?store=mixed");
+  record.timings.mixed = await mixed.evaluate(async () => {
+    let seed = 12345;
+    const rand = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+    const words = ["note", "plan", "trip", "mail", "tea", "stove", "garden", "invoice", "train", "doctor", "soon", "later", "red", "quiet", "bridge", "paper"];
+    const texts = Array.from({ length: 256 }, (_, n) => {
+      const chars = n === 0 ? 59 : n === 1 ? 2871 : 59 + Math.floor(rand() ** 2 * 2812);
+      let text = `Record ${n}:`;
+      while (text.length < chars) text += ` ${words[Math.floor(rand() * words.length)]}`;
+      return text.slice(0, chars).trim();
+    });
+    await window.demo.mind.embed(["load the model"]);
+    const t = performance.now();
+    await window.demo.memory.rememberMany(texts.map((text) => ({ text })));
+    const embedMs = Math.round(performance.now() - t);
+    const stored = (await window.demo.memory.exportAll({ vectors: true })).memories;
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const decode = (b64) => new Float32Array(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer);
+    const alone = [];
+    for (const text of texts) alone.push((await window.demo.mind.embed([text])).vectors[0]);
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const dot = (a, b) => a.reduce((sum, x, i) => sum + x * b[i], 0);
+    let minCosine = 1;
+    let wrongRank = 0;
+    let missing = 0;
+    for (const [n, text] of texts.entries()) {
+      const memory = stored.find((m) => m.text === text);
+      if (!memory?.vector) {
+        missing++;
+        continue;
+      }
+      const got = decode(memory.vector);
+      const scores = alone.map((vector) => dot(got, vector));
+      minCosine = Math.min(minCosine, scores[n]);
+      if (scores.indexOf(Math.max(...scores)) !== n) wrongRank++;
+    }
+    return { records: texts.length, embedMs, minCosine: Math.round(minCosine * 1e5) / 1e5, wrongRank, missing };
+  });
+  const mixedTimings = record.timings.mixed;
+  check(`256 mixed-length records embed in ${(mixedTimings.embedMs / 1000).toFixed(1)} s, under 60 s (F41)`, mixedTimings.embedMs < 60_000, mixedTimings);
+  check("each stored vector is closest to its own text embedded alone, cosine above 0.95 (F41)", mixedTimings.missing === 0 && mixedTimings.wrongRank === 0 && mixedTimings.minCosine > 0.95, mixedTimings);
+  await mixed.close();
   await page.close();
   await fox.close();
 

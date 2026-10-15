@@ -47,6 +47,7 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F38 | An import file sets `updatedAt` far in the future, so its memory gets the full recency boost and is never evicted. | importAll sets `createdAt` and `updatedAt` to now at most. | `tests/exchange.test.ts` |
 | F39 | One import file holds the same id twice, and both count as added. | It fails with `bad_import` and names both items. | `tests/exchange.test.ts` |
 | F40 | In merge mode, an imported id matches a stored memory with other text, and the import replaces that memory. | The imported item gets a new id. The stored memory stays as it was. | `tests/exchange.test.ts` |
+| F41 | A bulk embed pads every batch to its longest text, so mixed notes and chat turns run at the 256-token cap. | `embedAll` and the stale re-embed in `recall` sort texts by length before they batch. `embedAll` returns the vectors in input order. | E2E |
 
 ## AMO release build and listed submission (`scripts/amo-listing.mjs`)
 
