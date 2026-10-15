@@ -25,7 +25,8 @@ describe("model swap (F11)", () => {
     const [hit] = await memory.recall("cats purr");
     expect(hit?.memory.text).toBe("cats purr when happy");
     expect(hit?.similarity).toBeCloseTo(2 / Math.sqrt(8), 5);
-    expect(embedder.calls.slice(before + 1)).toEqual([["cats purr when happy", "dogs bark at night"], ["birds sing at dawn"]]);
+    // Shortest text first, so each batch pads to little.
+    expect(embedder.calls.slice(before + 1)).toEqual([["dogs bark at night", "birds sing at dawn"], ["cats purr when happy"]]);
     expect((await store.load()).map((record) => record.model)).toEqual(["model-b", "model-b", "model-b"]);
     expect((await memory.stats()).models).toEqual({ "model-b": 3 });
   });
