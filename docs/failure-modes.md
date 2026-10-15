@@ -48,6 +48,11 @@ gives the same vector for the same text, so each result is exact. The E2E test
 | F39 | One import file holds the same id twice, and both count as added. | It fails with `bad_import` and names both items. | `tests/exchange.test.ts` |
 | F40 | In merge mode, an imported id matches a stored memory with other text, and the import replaces that memory. | The imported item gets a new id. The stored memory stays as it was. | `tests/exchange.test.ts` |
 | F41 | A bulk embed pads every batch to its longest text, so mixed notes and chat turns run at the 256-token cap. | `embedAll` and the stale re-embed in `recall` sort texts by length before they batch. `embedAll` returns the vectors in input order. | E2E |
+| F42 | A large import has no vectors, and `recall` embeds every record before it ranks, so it finds nothing for minutes to hours. | `recall` embeds only the query, and only when a candidate has a vector. A memory with no vector ranks by word score alone. `embedPending` embeds those memories, newest first. | `tests/words.test.ts`, E2E |
+| F43 | `recall` scans the cosine of every vector, so it takes 35 ms or more at 20,000 memories. | A word index (BM25) picks the top 500 candidates, and cosine runs on those. The median recall at 20,000 memories is under 25 ms. | E2E |
+| F44 | The word index keeps words of a memory that was edited, forgotten, expired or cleared, or misses a write by another page. | The index follows every write. The index is built again when the store version changes. | `tests/words.test.ts` |
+| F45 | The word pass drops a memory that cosine would have ranked in the top 5. | At 1,000 memories, the top 5 of 20 seeded queries is the same set as cosine-only recall, with at most 1 query that differs. | E2E |
+| F46 | A query with no word in common with the memories (a paraphrase, or only stop words) finds nothing in a big store. | When fewer than `k` memories match by word, `recall` ranks every vector by cosine, as before. | `tests/words.test.ts` |
 
 ## AMO release build and listed submission (`scripts/amo-listing.mjs`)
 
