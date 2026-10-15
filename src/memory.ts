@@ -17,8 +17,13 @@ import {
 } from "./types.js";
 import { type ExportFile, parseExport, toExport } from "./exchange.js";
 import { checkVectors, dot } from "./vector.js";
+import { createWordIndex, type WordIndex } from "./words.js";
 
 const DAY = 86_400_000;
+/** Over the memory cap, how many memories the word pass hands to cosine ranking. */
+const CANDIDATES = 500;
+/** The default memory cap. Recall ranks every vector in a store up to this size. */
+const DEFAULT_MAX_ITEMS = 10_000;
 
 export interface MemoryOptions {
   store: Store;
@@ -42,7 +47,14 @@ export interface FoxMemory {
   remember(text: string, meta?: RememberMeta): Promise<RememberResult>;
   /** All or nothing: when one embed call fails, none is stored. Each result lists every id the call evicted. */
   rememberMany(items: (RememberMeta & { text: string })[]): Promise<RememberResult[]>;
+  /**
+   * The word index picks the best 500 candidates (all memories when there are 500
+   * or fewer), and cosine ranks those. A memory with no vector yet ranks by its
+   * word score alone, so recall works while a large import is not embedded.
+   */
   recall(query: string, options?: RecallOptions): Promise<Hit[]>;
+  /** Embeds up to `limit` memories that have no vector, newest first. Returns how many. Call it until it returns 0. */
+  embedPending(limit?: number): Promise<number>;
   update(id: string, patch: MemoryPatch): Promise<Memory>;
   /** Returns false when there was no such memory. */
   forget(id: string): Promise<boolean>;
@@ -114,23 +126,37 @@ export function createMemory(options: MemoryOptions): FoxMemory {
   const now = options.now ?? Date.now;
   const recencyWeight = options.recencyWeight ?? 0.05;
   const halfLifeMs = options.halfLifeMs ?? 30 * DAY;
-  const maxItems = options.maxItems ?? 10_000;
+  const maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS;
   const batchSize = options.batchSize ?? 32;
-  let cache: { version: number | string; records: Map<string, StoredMemory> } = { version: Number.NaN, records: new Map() };
+  let cache: { version: number | string; records: Map<string, StoredMemory>; words: WordIndex } = { version: Number.NaN, records: new Map(), words: createWordIndex() };
 
   /** The records, loaded again when another writer changed the store. */
   async function records(): Promise<Map<string, StoredMemory>> {
     const version = await store.version();
-    if (version !== cache.version) cache = { version, records: new Map((await store.load()).map((record) => [record.id, record])) };
+    if (version !== cache.version) {
+      const loaded = await store.load();
+      const words = createWordIndex();
+      for (const record of loaded) words.add(record.id, record.text);
+      cache = { version, records: new Map(loaded.map((record) => [record.id, record])), words };
+    }
     return cache.records;
   }
 
   /** Write a change, then apply it to the cache. Call it only under the lock. */
   async function write(change: Change): Promise<void> {
     const version = await store.write(change);
-    if (change.clear) cache.records.clear();
-    for (const id of change.remove) cache.records.delete(id);
-    for (const record of change.put) cache.records.set(record.id, record);
+    if (change.clear) {
+      cache.records.clear();
+      cache.words.clear();
+    }
+    for (const id of change.remove) {
+      cache.records.delete(id);
+      cache.words.remove(id);
+    }
+    for (const record of change.put) {
+      if (cache.records.get(record.id)?.text !== record.text) cache.words.add(record.id, record.text);
+      cache.records.set(record.id, record);
+    }
     cache.version = version;
   }
 
@@ -256,30 +282,42 @@ export function createMemory(options: MemoryOptions): FoxMemory {
       const k = recallOptions.k ?? 5;
       const minScore = recallOptions.minScore ?? 0;
       if (k <= 0 || (await records()).size === 0) return [];
-      const { vectors, model } = await embed([query]);
-      const q = vectors[0]!;
+      const wanted = (record: StoredMemory) => !recallOptions.kinds || recallOptions.kinds.includes(record.kind);
       return store.lock(async () => {
         const all = await current();
-        // Embed records from another model again, so two spaces never mix.
-        const stale = [...all.values()].filter((record) => record.model !== model || record.vector?.length !== q.length).toSorted((a, b) => a.text.length - b.text.length);
-        for (let i = 0; i < stale.length; i += batchSize) {
-          const batch = stale.slice(i, i + batchSize);
-          const fresh = await embed(batch.map((record) => record.text));
-          if (fresh.model !== model || fresh.vectors[0]!.length !== q.length) {
-            throw new FoxmemoryError("embed_failed", `The embedder changed from ${model} to ${fresh.model} while it embedded old memories again. Try again.`);
+        const words = cache.words.search(query, CANDIDATES, (id) => wanted(all.get(id)!));
+        const lexical = new Map(words.map((hit) => [hit.id, hit.score / words[0]!.score]));
+        // Up to the default cap, rank every vector, so recall equals a cosine scan. Over it (a raised `maxItems`), the word pass bounds the scan.
+        // With few word matches (a paraphrase, or only stop words), rank every vector too.
+        const everyone = all.size <= DEFAULT_MAX_ITEMS || words.length < k;
+        let candidates = everyone ? [...all.values()].filter(wanted) : words.map((hit) => all.get(hit.id)!);
+        let q: Float32Array | undefined;
+        let model = "";
+        if (candidates.some((record) => record.vector)) {
+          const embedded = await embed([query]);
+          q = embedded.vectors[0]!;
+          model = embedded.model;
+          // Embed candidates from another model again, so two spaces never mix.
+          const stale = candidates.filter((record) => record.vector && (record.model !== model || record.vector.length !== q!.length)).toSorted((a, b) => a.text.length - b.text.length);
+          for (let i = 0; i < stale.length; i += batchSize) {
+            const batch = stale.slice(i, i + batchSize);
+            const fresh = await embed(batch.map((record) => record.text));
+            if (fresh.model !== model || fresh.vectors[0]!.length !== q.length) {
+              throw new FoxmemoryError("embed_failed", `The embedder changed from ${model} to ${fresh.model} while it embedded old memories again. Try again.`);
+            }
+            // Read the store again: write back only memories that are still there.
+            const present = await current();
+            const put = batch.flatMap((record, j) => (present.get(record.id)?.text === record.text ? [{ ...present.get(record.id)!, model, vector: fresh.vectors[j]! }] : []));
+            if (put.length > 0) await write({ put, remove: [] });
           }
-          // Read the store again: write back only memories that are still there.
-          const present = await current();
-          const put = batch.flatMap((record, j) => (present.get(record.id)?.text === record.text ? [{ ...present.get(record.id)!, model, vector: fresh.vectors[j]! }] : []));
-          if (put.length > 0) await write({ put, remove: [] });
+          const ranked = await current();
+          candidates = candidates.flatMap((record) => ranked.get(record.id) ?? []);
         }
         const time = now();
-        const ranked = await current();
         const hits: { record: StoredMemory; similarity: number; score: number }[] = [];
-        for (const record of ranked.values()) {
-          if (!record.vector) continue;
-          if (recallOptions.kinds && !recallOptions.kinds.includes(record.kind)) continue;
-          const similarity = dot(q, record.vector);
+        for (const record of candidates) {
+          // A memory with no vector has its word score (0 to 1) in place of a cosine.
+          const similarity = q && record.vector ? dot(q, record.vector) : (lexical.get(record.id) ?? 0);
           if (similarity < minScore) continue;
           hits.push({ record, similarity, score: similarity + recencyWeight * 0.5 ** (Math.max(0, time - record.updatedAt) / halfLifeMs) });
         }
@@ -287,6 +325,18 @@ export function createMemory(options: MemoryOptions): FoxMemory {
         return hits.slice(0, k).map(({ record, similarity, score }) => ({ memory: view(record), similarity, score }));
       });
     },
+
+    embedPending: (limit = 256) =>
+      store.lock(async () => {
+        const pending = [...(await current()).values()].filter((record) => !record.vector).toSorted((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+        if (pending.length === 0) return 0;
+        const { vectors, model } = await embedAll(pending.map((record) => record.text));
+        // Read the store again: write back only memories that are still there.
+        const present = await current();
+        const put = pending.flatMap((record, i) => (present.get(record.id)?.text === record.text ? [{ ...present.get(record.id)!, model, vector: vectors[i]! }] : []));
+        if (put.length > 0) await write({ put, remove: [] });
+        return pending.length;
+      }),
 
     async update(id, patch) {
       checkKind(patch.kind);
