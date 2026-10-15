@@ -5,10 +5,11 @@ import { createMind } from "foxmind";
 import { transformers } from "foxmind/browser";
 import { createMemory, indexedDbStore } from "../src/index.js";
 
-const storeName = new URLSearchParams(location.search).get("store") ?? "demo";
+const params = new URLSearchParams(location.search);
+const storeName = params.get("store") ?? "demo";
 // Memories are private: the router may use only on-device and same-machine models.
 const mind = createMind({ providers: [transformers({ task: "embed" })], only: ["browser", "local"] });
-const memory = createMemory({ store: indexedDbStore(storeName), embedder: mind });
+const memory = createMemory({ store: indexedDbStore(storeName), embedder: mind, ...(params.has("max") && { maxItems: Number(params.get("max")) }) });
 // Other open Memory pages draw the list again after each change here.
 const channel = new BroadcastChannel(`foxmemory:${storeName}`);
 const $ = (id) => document.getElementById(id);
@@ -127,9 +128,17 @@ $("export").addEventListener("click", () =>
   }),
 );
 
+// Embed the memories that have no vector, in the background. Recall works by words meanwhile.
+function embedInBackground() {
+  window.demo.embedding = (async () => {
+    while ((await memory.embedPending()) > 0) await changed();
+  })().catch((error) => say(error.message, true));
+}
+
 async function importText(text) {
   const result = await memory.importAll(text);
-  await changed(`Imported: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped.`);
+  await changed(`Imported: ${result.added} added, ${result.updated} updated, ${result.skipped} skipped. Embedding them in the background.`);
+  embedInBackground();
   return result;
 }
 
@@ -156,5 +165,5 @@ $("clear").addEventListener("click", () =>
 
 channel.addEventListener("message", () => render());
 // For tests and the console: the memory, the model router, and the text of each export.
-window.demo = { memory, mind, exports: [], importText };
+window.demo = { memory, mind, exports: [], importText, embedding: Promise.resolve(), lib: { createMemory, indexedDbStore } };
 attempt(render);

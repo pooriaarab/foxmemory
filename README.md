@@ -51,10 +51,13 @@ Use a local provider policy if memory text must stay on your device.
 
 ```text
 Text -> optional redact hook -> embedder -> deduplicate -> store
-Query -> embedder -> refresh stale vectors -> cosine score + recency -> top k
+Query -> word index (BM25, top 500) -> embedder -> refresh stale vectors -> cosine score + recency -> top k
 ```
 
-Recall scans all stored vectors.
+Recall ranks by words first: the word index picks the best 500 memories (all of
+them when there are 500 or fewer), and cosine ranks those. When fewer than `k`
+memories share a word with the query, recall ranks every vector. A memory with
+no vector yet ranks by its word score alone.
 A model or dimension change causes old records to receive new embeddings.
 Writes use the store's lock and version to coordinate writers.
 
@@ -120,6 +123,7 @@ No storage adapter above is a scaffold.
 | `memory.remember(text, { kind?, source?, pinned?, ttlMs?, expiresAt? })` | Stores one memory. Returns `{ memory, deduped, evicted }`. `kind` is `fact` (default), `preference` or `task-note`. `source` defaults to `user`. |
 | `memory.rememberMany(items)` | Stores many in one write. When one embed call fails, it stores none. |
 | `memory.recall(query, { k?, kinds?, minScore? })` | The best `k` (default 5) memories: `[{ memory, similarity, score }]`. `minScore` applies to `similarity`. |
+| `memory.embedPending(limit?)` | Embeds up to `limit` (default 256) memories that have no vector, newest first. Returns how many. Call it until it returns 0 after a large import; recall works by words meanwhile. |
 | `memory.update(id, { text?, kind?, source?, pinned?, expiresAt? })` | Changes a memory. A new text gets a new vector. `expiresAt: null` removes the expiry. |
 | `memory.forget(id)` | Deletes one memory and its vector. Returns `false` when there was none. |
 | `memory.forgetWhere({ kinds?, source?, contains?, before?, pinned? })` | Deletes every match and returns the count. An empty filter fails. |
@@ -182,8 +186,13 @@ foxmind on WASM or WebGPU. Build it with `pnpm build:ext` and load
   numbers are about 15 MB.
 - Dedupe matches exact text only, in any case and spacing. "I like tea" and
   "I love tea" stay two memories.
-- After a model swap, the next recall embeds every old memory again while it
-  holds the lock. With many memories, that recall is slow.
+- After a model swap, the next recall embeds the old memories among its
+  candidates again while it holds the lock. With many memories, that recall is slow.
+- Recall does not embed memories that have no vector (for example after an
+  import). Call `embedPending` for that.
+- The word pass splits text on anything that is not a letter or a digit, so it
+  is for English. A paraphrase with no shared word finds a memory only when
+  fewer than `k` memories share a word with the query.
 - The recency boost uses `updatedAt`, not the last time a memory was recalled.
 - Memories are not encrypted. They sit in IndexedDB or in the JSON file as
   plain text. The `redact` hook is only a hook: foxmemory has no secret
