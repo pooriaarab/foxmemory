@@ -20,8 +20,10 @@ import { checkVectors, dot } from "./vector.js";
 import { createWordIndex, type WordIndex } from "./words.js";
 
 const DAY = 86_400_000;
-/** How many memories the word pass hands to cosine ranking. */
+/** Over the memory cap, how many memories the word pass hands to cosine ranking. */
 const CANDIDATES = 500;
+/** The default memory cap. Recall ranks every vector in a store up to this size. */
+const DEFAULT_MAX_ITEMS = 10_000;
 
 export interface MemoryOptions {
   store: Store;
@@ -124,7 +126,7 @@ export function createMemory(options: MemoryOptions): FoxMemory {
   const now = options.now ?? Date.now;
   const recencyWeight = options.recencyWeight ?? 0.05;
   const halfLifeMs = options.halfLifeMs ?? 30 * DAY;
-  const maxItems = options.maxItems ?? 10_000;
+  const maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS;
   const batchSize = options.batchSize ?? 32;
   let cache: { version: number | string; records: Map<string, StoredMemory>; words: WordIndex } = { version: Number.NaN, records: new Map(), words: createWordIndex() };
 
@@ -285,8 +287,9 @@ export function createMemory(options: MemoryOptions): FoxMemory {
         const all = await current();
         const words = cache.words.search(query, CANDIDATES, (id) => wanted(all.get(id)!));
         const lexical = new Map(words.map((hit) => [hit.id, hit.score / words[0]!.score]));
-        // Few word matches (a paraphrase, or only stop words): rank every vector, as before.
-        const everyone = all.size <= CANDIDATES || words.length < k;
+        // Up to the default cap, rank every vector, so recall equals a cosine scan. Over it (a raised `maxItems`), the word pass bounds the scan.
+        // With few word matches (a paraphrase, or only stop words), rank every vector too.
+        const everyone = all.size <= DEFAULT_MAX_ITEMS || words.length < k;
         let candidates = everyone ? [...all.values()].filter(wanted) : words.map((hit) => all.get(hit.id)!);
         let q: Float32Array | undefined;
         let model = "";

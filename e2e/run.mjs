@@ -139,10 +139,12 @@ async function wordIndexChecks() {
     check(`recall at 20,000 records takes ${words.withVectors.medianMs} ms median over 20 queries, under 25 ms (F43)`, words.withVectors.medianMs < 25, words.withVectors);
     await page.close();
 
-    // (c) 1,000 records, a bag-of-words embedder: top 5 equals a cosine-only scan.
-    page = await wordsPage(fox, "words-parity", 2000);
-    const parity = corpus(1000, 11);
-    words.parity = await page.evaluate(
+    // (c) 1,000 records and the 10,000 cap, a bag-of-words embedder: top 5 equals a cosine-only scan.
+    words.parity = {};
+    for (const records of [1000, 10_000]) {
+    page = await wordsPage(fox, "words-parity", records);
+    const parity = corpus(records, 11);
+    words.parity[records] = await page.evaluate(
       async (items, queryList) => {
         // A bag of words with one slot per word, so cosine needs a shared word, as the word pass does.
         const slots = new Map();
@@ -161,7 +163,7 @@ async function wordIndexChecks() {
             };
           },
         };
-        const memory = window.demo.lib.createMemory({ store: window.demo.lib.indexedDbStore("words-parity"), embedder, maxItems: 2000 });
+        const memory = window.demo.lib.createMemory({ store: window.demo.lib.indexedDbStore("words-parity"), embedder });
         await memory.rememberMany(items.map((text) => ({ text })));
         const stored = (await memory.exportAll({ vectors: true })).memories.map((m) => ({ id: m.id, vector: new Float32Array(Uint8Array.from(atob(m.vector), (c) => c.charCodeAt(0)).buffer) }));
         let differ = 0;
@@ -177,8 +179,9 @@ async function wordIndexChecks() {
       parity.texts,
       parity.queries,
     );
-    check(`top 5 of 20 queries at 1,000 records equals cosine-only recall, ${words.parity.differ} differ, at most 1 (F45)`, words.parity.differ <= 1, words.parity);
+    check(`top 5 of 20 queries at ${records.toLocaleString("en-US")} records equals cosine-only recall, ${words.parity[records].differ} differ (F45)`, words.parity[records].differ === 0, words.parity[records]);
     await page.close();
+    }
   } finally {
     words.totalMs = Date.now() - t0;
     record.timings.words = words;

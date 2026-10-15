@@ -52,19 +52,19 @@ describe("recall without vectors (F42)", () => {
   });
 });
 
-describe("recall in a store over 500 memories (F44, F46)", () => {
+describe("recall in a store over the default cap of 10,000 memories (F44, F46)", () => {
   it("follows an edit and a forget, and falls back to every vector with no word match", async () => {
     const embedder = fakeEmbedder();
-    const memory = createMemory({ store: memoryStore(), embedder, maxItems: 1000 });
-    await memory.importAll(file([...filler(600), "The marmot crossing is on Elm Street"]));
-    await memory.embedPending(1000);
+    const memory = createMemory({ store: memoryStore(), embedder, maxItems: 12_000 });
+    await memory.importAll(file([...filler(10_100), ...Array.from({ length: 5 }, (_, i) => `The marmot crossing ${i} is on Elm Street`), "marmot"]));
+    await memory.embedPending(12_000);
     // The fake embedder has 256 slots, so a hash collision can tie another memory: look at the top 5.
     const ids = async (query: string) => (await memory.recall(query)).map((hit) => hit.memory.id);
-    expect(await ids("marmot")).toContain("m600");
-    await memory.update("m600", { text: "The okapi house is on Elm Street" });
-    expect(await ids("okapi")).toContain("m600");
-    await memory.forget("m600");
-    expect(await ids("okapi")).not.toContain("m600");
+    expect(await ids("marmot")).toContain("m10105");
+    await memory.update("m10105", { text: "okapi" });
+    expect(await ids("okapi")).toContain("m10105");
+    await memory.forget("m10105");
+    expect(await ids("okapi")).not.toContain("m10105");
     // "the" is a stop word, so the word pass is empty and cosine ranks every vector.
     await memory.update("m1", { text: "The harbour closes at nine" });
     expect(await ids("the")).toContain("m1");

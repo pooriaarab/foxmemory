@@ -51,13 +51,15 @@ Use a local provider policy if memory text must stay on your device.
 
 ```text
 Text -> optional redact hook -> embedder -> deduplicate -> store
-Query -> word index (BM25, top 500) -> embedder -> refresh stale vectors -> cosine score + recency -> top k
+Query -> word index (BM25; over 10,000 memories, top 500) -> embedder -> refresh stale vectors -> cosine score + recency -> top k
 ```
 
-Recall ranks by words first: the word index picks the best 500 memories (all of
-them when there are 500 or fewer), and cosine ranks those. When fewer than `k`
-memories share a word with the query, recall ranks every vector. A memory with
-no vector yet ranks by its word score alone.
+Up to the default memory cap (10,000), recall ranks every vector by cosine, so
+it returns the same result as a cosine-only scan. Over it (a store with a raised
+`maxItems`), the word index picks the best 500 memories and
+cosine ranks those; when fewer than `k` memories share a word with the query,
+recall ranks every vector. A memory with no vector yet ranks by its word score
+alone, so recall answers while an import is still being embedded.
 A model or dimension change causes old records to receive new embeddings.
 Writes use the store's lock and version to coordinate writers.
 
