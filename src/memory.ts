@@ -171,15 +171,17 @@ export function createMemory(options: MemoryOptions): FoxMemory {
     return { text: kept, kind: meta.kind, source: meta.source, pinned: meta.pinned, expiresAt };
   }
 
-  /** Embed texts in batches. Every batch must come from one model. */
+  /** Embed texts in batches of similar length, so a batch pads to little. Vectors come back in input order. */
   async function embedAll(texts: string[]) {
-    const vectors: Float32Array[] = [];
+    const order = Array.from(texts.keys()).toSorted((a, b) => texts[a]!.length - texts[b]!.length);
+    const vectors = Array.from<Float32Array>({ length: texts.length });
     let model = "";
-    for (let i = 0; i < texts.length; i += batchSize) {
-      const reply = await embed(texts.slice(i, i + batchSize));
+    for (let i = 0; i < order.length; i += batchSize) {
+      const slice = order.slice(i, i + batchSize);
+      const reply = await embed(slice.map((index) => texts[index]!));
       if (model && reply.model !== model) throw new FoxmemoryError("embed_failed", `The embedder changed from ${model} to ${reply.model} in one call. Try again.`);
       model = reply.model;
-      vectors.push(...reply.vectors);
+      for (const [j, index] of slice.entries()) vectors[index] = reply.vectors[j]!;
     }
     return { vectors, model };
   }
@@ -259,7 +261,7 @@ export function createMemory(options: MemoryOptions): FoxMemory {
       return store.lock(async () => {
         const all = await current();
         // Embed records from another model again, so two spaces never mix.
-        const stale = [...all.values()].filter((record) => record.model !== model || record.vector?.length !== q.length);
+        const stale = [...all.values()].filter((record) => record.model !== model || record.vector?.length !== q.length).toSorted((a, b) => a.text.length - b.text.length);
         for (let i = 0; i < stale.length; i += batchSize) {
           const batch = stale.slice(i, i + batchSize);
           const fresh = await embed(batch.map((record) => record.text));
