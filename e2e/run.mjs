@@ -57,8 +57,141 @@ const rowAction = (page, text, action) =>
     action,
   );
 
+
+// A seeded corpus of notes and chat turns. Words come from a Zipf-like list, so a
+// query word is common, as in real text. Targets carry two rare marker words.
+const letters = (n) => [...String(n)].map((d) => String.fromCharCode(97 + Number(d))).join("");
+const markers = (n) => [`qzx${letters(n)}`, `vyw${letters(n)}`];
+function corpus(size, seed, targets = []) {
+  let state = seed;
+  const rand = () => (state = (Math.imul(state, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+  const syllables = ["ka", "lo", "mi", "ra", "su", "ten", "vo", "bel", "dun", "fi", "gor", "hal"];
+  const vocab = Array.from({ length: 1728 }, (_, i) => syllables[i % 12] + syllables[Math.floor(i / 12) % 12] + syllables[Math.floor(i / 144) % 12]);
+  const words = (n) => Array.from({ length: n }, () => vocab[Math.floor(rand() ** 3 * vocab.length)]).join(" ");
+  const texts = Array.from({ length: size }, (_, n) => (n % 2 ? `user: ${words(5 + Math.floor(rand() * 12))} assistant: ${words(8 + Math.floor(rand() * 20))} #${n}` : `Note ${n}: ${words(8 + Math.floor(rand() * 14))}`));
+  for (const n of targets) texts[n] += ` ${markers(n).join(" ")}`;
+  // Each query takes three words of one record.
+  const queries = Array.from({ length: 20 }, () => texts[Math.floor(rand() * size)].match(/[a-z]{4,}/g).filter((w) => vocab.includes(w)).slice(0, 3).join(" "));
+  return { texts, queries };
+}
+
+/** The Memory page on a store of its own, with room for `max` memories. */
+const wordsPage = (fox, store, max) => memoryPage(fox, `?store=${store}&max=${max}`);
+
+// F42, F43, F45: the word index ranks first, and recall works before embedding ends.
+async function wordIndexChecks() {
+  const t0 = Date.now();
+  const size = 20_000;
+  const targets = [3, 4_001, 9_998, 15_555, 19_999];
+  const { texts, queries } = corpus(size, 7, targets);
+  const fox = await launch({ extension: "dist-ext", headless, prefs: { "extensions.background.idle.timeout": 600_000 } });
+  const words = { size };
+  try {
+    // (a) Import with no vectors, then ask by words. A recall that embeds every record first never returns.
+    let page = await wordsPage(fox, "words", size);
+    await page.evaluate(() => window.demo.mind.embed(["load the model"]));
+    words.importMs = await page.evaluate(async (items) => {
+      const t = performance.now();
+      const memories = items.map((text, n) => ({ id: `w${n}`, text, kind: "fact", source: "e2e", createdAt: n, updatedAt: n, pinned: false }));
+      await window.demo.memory.importAll({ format: "foxmemory", version: 1, exportedAt: 0, memories }, { mode: "replace" });
+      return Math.round(performance.now() - t);
+    }, texts);
+    const found = [];
+    for (const n of targets) {
+      const started = Date.now();
+      const answer = await Promise.race([page.evaluate((q) => window.demo.memory.recall(q, { k: 5 }).then((hits) => hits.map((hit) => hit.memory.id)), markers(n).join(" ")), new Promise((done) => setTimeout(done, 2000, "no answer in 2 s"))]);
+      found.push({ want: `w${n}`, got: Array.isArray(answer) ? answer[0] : answer, ms: Date.now() - started });
+      if (!Array.isArray(answer)) break;
+    }
+    words.found = found;
+    check("20,000 imported records with no vectors: a word query finds its record within 2 s of the import (F42)", found.length === targets.length && found.every((f) => f.got === f.want && f.ms < 2000), found);
+    await page.close();
+
+    // (b) The same records with vectors: recall at 20,000 under 25 ms median. The query is embedded by MiniLM.
+    page = await wordsPage(fox, "words", size);
+    words.withVectors = await page.evaluate(
+      async (items, queryList) => {
+        // oxlint-disable-next-line unicorn/consistent-function-scoping
+        const vector = (n) => {
+          const v = new Float32Array(384);
+          for (let i = 0; i < 384; i++) v[i] = Math.sin(n * 12.9898 + i * 78.233) % 1;
+          let binary = "";
+          for (const byte of new Uint8Array(v.buffer)) binary += String.fromCharCode(byte);
+          return btoa(binary);
+        };
+        const memories = items.map((text, n) => ({ id: `w${n}`, text, kind: "fact", source: "e2e", createdAt: n, updatedAt: n, pinned: false, model: "Xenova/all-MiniLM-L6-v2", vector: vector(n) }));
+        await window.demo.memory.importAll({ format: "foxmemory", version: 1, exportedAt: 0, memories }, { mode: "replace", trustVectors: true });
+        let t = performance.now();
+        await window.demo.memory.recall("warm up the page", { k: 5 });
+        const firstMs = Math.round(performance.now() - t);
+        const times = [];
+        for (const q of queryList) {
+          t = performance.now();
+          await window.demo.memory.recall(q, { k: 5 });
+          times.push(performance.now() - t);
+        }
+        const sorted = times.toSorted((a, b) => a - b);
+        return { firstMs, medianMs: Math.round(sorted[10] * 10) / 10, maxMs: Math.round(sorted[19] * 10) / 10 };
+      },
+      texts,
+      queries,
+    );
+    check(`recall at 20,000 records takes ${words.withVectors.medianMs} ms median over 20 queries, under 25 ms (F43)`, words.withVectors.medianMs < 25, words.withVectors);
+    await page.close();
+
+    // (c) 1,000 records and the 10,000 cap, a bag-of-words embedder: top 5 equals a cosine-only scan.
+    words.parity = {};
+    for (const records of [1000, 10_000]) {
+    page = await wordsPage(fox, "words-parity", records);
+    const parity = corpus(records, 11);
+    words.parity[records] = await page.evaluate(
+      async (items, queryList) => {
+        // A bag of words with one slot per word, so cosine needs a shared word, as the word pass does.
+        const slots = new Map();
+        const embedder = {
+          async embed(list) {
+            return {
+              model: "bag-of-words",
+              vectors: list.map((text) => {
+                const v = Array.from({ length: 2048 }, () => 0);
+                for (const word of text.toLowerCase().match(/[a-z]+/g) ?? []) {
+                  if (!slots.has(word)) slots.set(word, slots.size % 2048);
+                  v[slots.get(word)] += 1;
+                }
+                return v;
+              }),
+            };
+          },
+        };
+        const memory = window.demo.lib.createMemory({ store: window.demo.lib.indexedDbStore("words-parity"), embedder });
+        await memory.rememberMany(items.map((text) => ({ text })));
+        const stored = (await memory.exportAll({ vectors: true })).memories.map((m) => ({ id: m.id, vector: new Float32Array(Uint8Array.from(atob(m.vector), (c) => c.charCodeAt(0)).buffer) }));
+        let differ = 0;
+        for (const q of queryList) {
+          const { vectors } = await embedder.embed([q]);
+          const norm = Math.hypot(...vectors[0]);
+          const scan = stored.map((m) => ({ id: m.id, s: m.vector.reduce((sum, x, i) => sum + (x * vectors[0][i]) / norm, 0) })).toSorted((a, b) => b.s - a.s).slice(0, 5).map((m) => m.id);
+          const got = (await memory.recall(q, { k: 5 })).map((hit) => hit.memory.id);
+          if (scan.some((id) => !got.includes(id))) differ++;
+        }
+        return { records: items.length, queries: queryList.length, differ };
+      },
+      parity.texts,
+      parity.queries,
+    );
+    check(`top 5 of 20 queries at ${records.toLocaleString("en-US")} records equals cosine-only recall, ${words.parity[records].differ} differ (F45)`, words.parity[records].differ === 0, words.parity[records]);
+    await page.close();
+    }
+  } finally {
+    words.totalMs = Date.now() - t0;
+    record.timings.words = words;
+    await fox.close();
+  }
+}
+
 let fox;
 try {
+  await wordIndexChecks();
   fox = await launch({ extension: "dist-ext", headless, prefs: { "extensions.background.idle.timeout": 600_000 } });
   record.firefox = await fox.browser.version();
   const page = await memoryPage(fox);
@@ -161,6 +294,7 @@ try {
   const started = Date.now();
   const imported = await page.evaluate((text) => window.demo.importText(text), JSON.stringify(exported));
   record.timings.importMs = Date.now() - started;
+  await page.evaluate(() => window.demo.embedding);
   const reembed = await recallThroughForm(page, "Who looks after my teeth?");
   record.timings.recallWithReembedOfAllMs = reembed.pageMs;
   const restored = await page.evaluate(() => window.demo.memory.list());
